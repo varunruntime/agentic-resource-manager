@@ -15,7 +15,7 @@ from app.agents.execution import ExecutionAgent
 from app.agents.evaluation import EvaluationAgent
 from app.agents.orchestrator import AgentOrchestrator
 from app.policies.safety import validate
-from app.services.experiments import run_comparison
+from app.services.experiments import run_comparison, _add_derived_metrics
 
 
 WEIGHTS = SimpleNamespace(
@@ -260,3 +260,26 @@ def test_sudden_spike_scenario_exercises_threshold_scaling():
     baseline, proposed = run_comparison("Sudden Spike", duration=24, seed=42)
     assert baseline["scaling_actions"] >= 1
     assert proposed["scaling_actions"] >= 1
+
+
+def test_derived_metrics_preserves_post_action_values():
+    post_action = {
+        "cpu_percent": 50.0,
+        "memory_percent": 60.0,
+        "latency_ms": 75.0,
+        "throughput": 84.0,
+        "estimated_cost": 0.30,
+        "estimated_energy": 0.50,
+        "cpu_capacity_multiplier": 1.5,
+    }
+
+    result = _add_derived_metrics(
+        post_action,
+        instances=2,
+        cpu_capacity_multiplier=1.5,
+    )
+
+    assert result["latency_ms"] == 75.0
+    assert result["throughput"] == 84.0
+    assert result["estimated_cost"] == 0.30
+    assert result["estimated_energy"] == 0.50
