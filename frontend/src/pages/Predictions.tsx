@@ -1,6 +1,175 @@
-import {useEffect,useState} from 'react'; import {api} from '../lib/api'; import Chart from '../components/Line';
-export default function Predictions(){const [rows,setRows]=useState<any[]>([]);const [busy,setBusy]=useState(false);async function load(){setRows((await api.get('/api/predictions/history')).data)}useEffect(()=>{load()},[]);async function run(){setBusy(true);try{await api.post('/api/agents/run?mode=recommendation');await load()}finally{setBusy(false)}}
-const latest=rows.slice(-4);return <main><div className="flex justify-between items-start mb-6"><div><h1 className="text-3xl font-bold">Predictions</h1><p className="text-slate-500 mt-1">Local time-series forecasts with measured error metrics.</p></div><button disabled={busy} onClick={run} className="bg-indigo-600 text-white px-4 py-2 rounded-lg disabled:opacity-50">{busy?'Generating...':'Generate Prediction'}</button></div>
-<section className="grid grid-cols-4 gap-4 mb-6">{latest.map(p=><div key={p.id} className="bg-white border rounded-xl p-4"><div className="text-sm text-slate-500">{p.horizon_minutes} min forecast</div><div className="text-2xl font-bold mt-1">{Number(p.cpu_predicted).toFixed(1)}%</div><div className="text-xs text-slate-500 mt-1">confidence {Number(p.confidence).toFixed(2)}</div></div>)}</section>
-<section className="bg-white border rounded-xl p-5"><h2 className="font-semibold mb-3">Actual / Historical CPU & Memory</h2><Chart data={rows.map(p=>({timestamp:p.timestamp,cpu_percent:p.cpu_predicted,memory_percent:p.memory_predicted}))} keys={['cpu_percent','memory_percent']}/></section>
-<section className="bg-white border rounded-xl p-5 mt-5"><h2 className="font-semibold mb-4">Prediction Quality</h2><table className="w-full"><thead><tr className="text-left border-b text-slate-500"><th className="py-2">Horizon</th><th>CPU</th><th>Memory</th><th>Workload</th><th>Confidence</th><th>MAE</th><th>RMSE</th><th>MAPE</th></tr></thead><tbody>{latest.map(p=><tr key={p.id} className="border-b"><td className="py-2">{p.horizon_minutes} min</td><td>{Number(p.cpu_predicted).toFixed(1)}%</td><td>{Number(p.memory_predicted).toFixed(1)}%</td><td>{Number(p.workload_predicted).toFixed(1)}</td><td>{Number(p.confidence).toFixed(2)}</td><td>{Number(p.mae).toFixed(3)}</td><td>{Number(p.rmse).toFixed(3)}</td><td>{Number(p.mape).toFixed(2)}%</td></tr>)}</tbody></table></section></main>}
+import { useEffect, useState } from "react";
+import { api } from "../lib/api";
+import Chart from "../components/Line";
+
+type Prediction = {
+  id: number;
+  timestamp: string;
+  horizon_minutes: number;
+  cpu_predicted: number;
+  memory_predicted: number;
+  workload_predicted: number;
+  confidence: number;
+  mae: number;
+  rmse: number;
+  mape: number;
+};
+
+type Metric = { timestamp: string; cpu_percent: number; memory_percent: number };
+function value(input: unknown, digits = 1) {
+  if (input === null || input === undefined || input === "") return "—";
+  const n = Number(input);
+  return Number.isFinite(n) ? n.toFixed(digits) : "—";
+}
+
+export default function Predictions() {
+  const [rows, setRows] = useState<Prediction[]>([]);
+  const [actualRows, setActualRows] = useState<Metric[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function load() {
+    const [predictions, history] = await Promise.all([
+      api.get("/api/predictions/history"),
+      api.get("/api/resources/history"),
+    ]);
+    setRows(Array.isArray(predictions.data) ? predictions.data : []);
+    setActualRows(Array.isArray(history.data) ? history.data : []);
+  }
+
+  useEffect(() => {
+    load().catch((err) => {
+      console.error(err);
+      setError("Unable to load prediction history. Check the backend connection.");
+    });
+  }, []);
+
+  async function run() {
+    setBusy(true);
+    setError("");
+    try {
+      const [current, history] = await Promise.all([
+        api.get("/api/resources/current"),
+        api.get("/api/resources/history"),
+      ]);
+      const observedHistory = history.data.length ? history.data : [current.data];
+      await api.post("/api/agents/run", {
+        history: observedHistory,
+        state: current.data,
+        mode: "recommendation",
+      });
+      await load();
+    } catch (err) {
+      console.error(err);
+      setError("Prediction generation failed. Check the backend connection.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const latest = rows.slice(-4);
+  return (
+    <main>
+      <header className="page-head">
+        <div>
+          <div className="page-eyebrow">Forecast intelligence</div>
+          <h1 className="page-title">Resource Predictions</h1>
+          <p className="page-description">
+            Review time-series resource forecasts, confidence and CPU validation metrics from chronological holdout evaluation.
+          </p>
+        </div>
+        <div className="page-actions">
+          <button type="button" disabled={busy} onClick={run} className="btn-primary">
+            {busy ? "Generating…" : "Generate prediction"}
+          </button>
+        </div>
+      </header>
+
+      {error && <div role="alert" className="alert alert-error">{error}</div>}
+
+      <section className="metrics-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))", marginBottom: 16 }}>
+        {latest.map((prediction) => (
+          <article className="metric-card" key={prediction.id}>
+            <div className="metric-top">
+              <span className="metric-label">{prediction.horizon_minutes}-minute CPU forecast</span>
+              <span className="metric-symbol">CPU</span>
+            </div>
+            <div className="metric-value-row">
+              <span className="metric-value">{value(prediction.cpu_predicted)}</span>
+              <span className="metric-unit">%</span>
+            </div>
+            <div className="metric-detail">
+              {Number(prediction.confidence) > 0
+                ? `Validation confidence ${value(prediction.confidence, 2)}`
+                : "Validation not available yet"}
+            </div>
+          </article>
+        ))}
+        {latest.length === 0 && (
+          <div className="panel p-5 text-xs text-slate-500" style={{ gridColumn: "1 / -1" }}>
+            No forecasts available yet. Generate a prediction after resource readings have been collected.
+          </div>
+        )}
+      </section>
+
+      <section className="panel panel-pad" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <div>
+            <h2 className="panel-title">Observed resource history</h2>
+            <p className="panel-subtitle">Actual CPU and memory measurements. Forecasts are listed separately below.</p>
+          </div>
+          <div className="chart-legend">
+            <span className="legend-item"><span className="legend-swatch" /> CPU</span>
+            <span className="legend-item"><span className="legend-swatch teal" /> Memory</span>
+          </div>
+        </div>
+        <Chart data={actualRows} keys={["cpu_percent", "memory_percent"]} />
+      </section>
+
+      <section className="panel panel-pad">
+        <div className="panel-header">
+          <div>
+            <h2 className="panel-title">Forecast validation</h2>
+            <p className="panel-subtitle">MAE, RMSE and MAPE use chronological CPU holdout predictions.</p>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[780px]">
+            <thead>
+              <tr className="border-b text-left">
+                <th className="py-3">Horizon</th>
+                <th>CPU forecast</th>
+                <th>Memory forecast</th>
+                <th>Workload forecast</th>
+                <th>Confidence</th>
+                <th>CPU MAE</th>
+                <th>CPU RMSE</th>
+                <th>CPU MAPE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {latest.map((prediction) => (
+                <tr key={prediction.id} className="border-b last:border-0">
+                  <td className="py-3 font-semibold text-slate-700">{prediction.horizon_minutes} min</td>
+                  <td>{value(prediction.cpu_predicted)}%</td>
+                  <td>{value(prediction.memory_predicted)}%</td>
+                  <td>{value(prediction.workload_predicted)}</td>
+                  <td>{value(prediction.confidence, 2)}</td>
+                  <td>{prediction.confidence > 0 ? value(prediction.mae, 3) : "N/A"}</td>
+                  <td>{prediction.confidence > 0 ? value(prediction.rmse, 3) : "N/A"}</td>
+                  <td>{prediction.confidence > 0 ? value(prediction.mape, 2) + "%" : "N/A"}</td>
+                </tr>
+              ))}
+              {latest.length === 0 && (
+                <tr><td colSpan={8} className="py-8 text-center text-slate-500">No prediction records yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-4 border-t border-slate-100 pt-4 text-[10px] leading-5 text-slate-500">
+          Validation metrics remain unavailable until sufficient observed history exists. Confidence is not a guarantee of forecast correctness.
+        </p>
+      </section>
+    </main>
+  );
+}

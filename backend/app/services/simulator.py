@@ -1,4 +1,6 @@
-import random, math
+import random
+import math
+
 from app.agents.monitoring import MonitoringAgent
 
 
@@ -17,9 +19,10 @@ class WorkloadSimulator:
             "periodic": "periodic",
             "anomaly": "anomaly",
             "anomalous": "anomaly",
-        } 
+        }
         kind = aliases.get(kind, kind)
         out = []
+
         for i in range(max(1, steps)):
             if kind == "stable":
                 load = initial + rng.uniform(-2, 2)
@@ -29,7 +32,7 @@ class WorkloadSimulator:
                 load = max(0, initial - growth * i) + rng.uniform(-2, 2)
             elif kind == "sudden_spike":
                 spike_start = int(steps * 0.65)
-                load = initial + (55 if i >= spike_start else 0) + rng.uniform(-2, 2)
+                load = initial + (65 if i >= spike_start else 0) + rng.uniform(-2, 2)
             elif kind == "periodic":
                 load = initial + 25 * math.sin(i / 5) + rng.uniform(-2, 2)
             elif kind == "anomaly":
@@ -38,8 +41,16 @@ class WorkloadSimulator:
                     load += 45
             else:
                 load = initial + rng.uniform(-10, 10)
+
             out.append(max(0, min(100, load)))
+
         return out
 
-    def metrics(self, load, instances, seed=None):
-        return MonitoringAgent().observe_simulated(load, max(1, int(instances)), 1, seed)
+    def metrics(self, load, instances, seed=None, cpu_capacity_multiplier=1.0):
+        return MonitoringAgent().observe_simulated(
+            load,
+            max(1, int(instances)),
+            1,
+            seed,
+            cpu_capacity_multiplier=cpu_capacity_multiplier,
+        )

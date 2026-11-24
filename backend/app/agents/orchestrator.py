@@ -7,25 +7,20 @@ from app.ml.predictor import DemandPredictor
 from app.agents.planning import PlanningAgent
 from app.agents.execution import ExecutionAgent
 from app.agents.evaluation import EvaluationAgent
-from app.policies.safety import validate
-from app.agents.reasoning import (
-    RuleBasedReasoningProvider,
-    LLMReasoningProvider,
-)
+from app.policies.safety import CRITICAL_WORKLOADS, validate
+from app.agents.reasoning import RuleBasedReasoningProvider
+
 
 class AgentOrchestrator:
     def __init__(self, db, settings):
         self.db = db
 
-        # Agent pipeline
         self.monitor = MonitoringAgent()
         self.analysis = AnalysisAgent()
         self.predictor = DemandPredictor()
-        self.reasoner = (
-            LLMReasoningProvider(settings.llm_api_key)
-            if settings.llm_api_key
-            else RuleBasedReasoningProvider()
-        )
+        # No external LLM API call is implemented yet. Keep the active
+        # provider deterministic and rule-based even when an API key is set.
+        self.reasoner = RuleBasedReasoningProvider()
         self.planner = PlanningAgent()
         self.execution = ExecutionAgent()
         self.evaluation = EvaluationAgent()
@@ -38,111 +33,102 @@ class AgentOrchestrator:
         mode="simulation",
         active_workloads=1,
         feedback=None,
+        last_action_time=None,
+        now=None,
+        critical=False,
     ):
         """
         Closed-loop agent cycle:
+        OBSERVE -> ANALYZE -> PREDICT -> REASON -> PLAN
+        -> SAFETY CHECK -> ACT -> EVALUATE -> FEEDBACK.
 
-        OBSERVE
-        -> ANALYZE
-        -> PREDICT
-        -> REASON
-        -> PLAN
-        -> SAFETY CHECK
-        -> ACT
-        -> EVALUATE
-        -> FEEDBACK
+        last_action_time/now use the same clock so callers can enforce the
+        deterministic scaling cooldown. Experiments supply a simulated clock.
         """
 
-        # ---------------------------------------------------------
-        # 1. OBSERVE
-        # ---------------------------------------------------------
-        if history:
-            observation = dict(history[-1])
-        else:
-            observation = dict(state)
+        # 1. OBSERVE: normalize the latest already-collected snapshot.
+        raw_observation = history[-1] if history else state
+        observation = self.monitor.observe_snapshot(raw_observation)
 
-        # Preserve feedback from the previous cycle.
         if feedback is not None:
             observation["previous_feedback"] = feedback
 
-       # 2. ANALYZE
+        # 2. ANALYZE current resource conditions.
         analysis = self.analysis.analyze(observation)
 
-        # 3. PREDICT
+        # 3. PREDICT from past/current observations only.
         prediction_history = history if history else [observation]
         predictions = self.predictor.predict(prediction_history)
 
-        # ---------------------------------------------------------
-        # 4. REASON
-        # ---------------------------------------------------------
+        # 4. REASON using current metrics, predictions and prior feedback.
         reasoning = self.reasoner.reason(
             observation,
             predictions,
             analysis,
-            feedback
+            feedback,
         )
 
-        # ---------------------------------------------------------
-        # 5. PLAN
-        # ---------------------------------------------------------
+        # 5. PLAN and rank the candidate actions.
         plan = self.planner.rank(
             reasoning["candidate_actions"],
             observation,
             weights,
-            predictions
+            predictions,
         )
-
         selected = plan["selected"]
 
-        # ---------------------------------------------------------
-        # 6. SAFETY CHECK
-        # ---------------------------------------------------------
+        # 6. SAFETY CHECK, including scaling cooldown.
         current_instances = int(
             state.get("instances", observation.get("instances", 2))
         )
-
+        decision_time = now or datetime.utcnow()
+        workload_markers = (
+            state.get("workload_type"),
+            state.get("workload_priority"),
+            state.get("workload_name"),
+            observation.get("workload_type"),
+            observation.get("workload_priority"),
+            observation.get("workload_name"),
+        )
+        is_critical = (
+            critical is True
+            or state.get("critical") is True
+            or observation.get("critical") is True
+            or any(
+                str(marker).strip().lower() in CRITICAL_WORKLOADS
+                for marker in workload_markers
+                if marker is not None
+            )
+        )
         safety = validate(
             selected,
             current_instances,
-            critical=False,
+            last_action_time=last_action_time,
+            now=decision_time,
+            critical=is_critical,
         )
 
-        # ---------------------------------------------------------
-        # 7. ACT
-        # ---------------------------------------------------------
+        # 7. ACT only in simulation mode and only after safety approval.
         if mode == "recommendation":
             before = dict(state)
             after = dict(state)
             outcome = "PENDING"
-
         elif mode != "simulation":
             before = dict(state)
             after = dict(state)
             outcome = "PENDING"
-
         elif not safety.approved:
             before = dict(state)
             after = dict(state)
             outcome = "REJECTED"
-
         else:
-            before, after = self.execution.simulate(
-                selected,
-                state,
-            )
+            before, after = self.execution.simulate(selected, state)
             outcome = "SUCCESS"
 
-        # ---------------------------------------------------------
-        # 8. EVALUATE
-        # ---------------------------------------------------------
-        evaluation = self.evaluation.evaluate(
-            before,
-            after,
-        )
+        # 8. EVALUATE the measured simulated before/after state.
+        evaluation = self.evaluation.evaluate(before, after)
 
-        # ---------------------------------------------------------
-        # 9. FEEDBACK
-        # ---------------------------------------------------------
+        # 9. FEEDBACK is returned to the caller for the next cycle.
         feedback_result = {
             "selected_action": selected["action"],
             "outcome": outcome,
@@ -154,24 +140,18 @@ class AgentOrchestrator:
             "slo_impact": evaluation["slo_impact"],
         }
 
-        decision_id = str(uuid.uuid4())
-
         return {
-            "decision_id": decision_id,
+            "decision_id": str(uuid.uuid4()),
             "timestamp": datetime.utcnow().isoformat(),
-
-            # Pipeline outputs
             "observation": observation,
             "prediction": predictions,
             "detected_problem": analysis,
             "reasoning": reasoning,
             "plan": plan,
-
             "safety": {
                 "approved": safety.approved,
                 "reason": safety.reason,
             },
-
             "selected_action": selected["action"],
             "actual_result": after,
             "evaluation": evaluation,
