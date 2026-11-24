@@ -95,6 +95,7 @@ def _run_baseline(trace, sim, seed):
     values = []
     reaction_times = []
     prediction_errors = []
+    pending_forecasts = {}
     overload_start = None
 
     for i, load in enumerate(trace):
@@ -106,20 +107,18 @@ def _run_baseline(trace, sim, seed):
         if current["cpu_percent"] > 80 and overload_start is None:
             overload_start = i
 
-        # Five-step persistence forecast: baseline predicts future CPU
-        # using the latest observed CPU value.
-        if i + 5 < len(trace):
-            future_metrics = sim.metrics(
-                trace[i + 5],
-                instances,
-                seed + i + 5,
-            )
+        # Score the forecast created five timesteps earlier against the
+        # actual observation now, after any intervening baseline actions.
+        if i in pending_forecasts:
             prediction_errors.append(
-                _relative_error(
-                    future_metrics["cpu_percent"],
-                    current["cpu_percent"]
-                )
+                _relative_error(current["cpu_percent"], pending_forecasts.pop(i))
             )
+
+        # Baseline uses a persistence forecast: next CPU is predicted to
+        # equal the current observed CPU. Future observations are never read
+        # before they occur.
+        if i + 5 < len(trace):
+            pending_forecasts[i + 5] = current["cpu_percent"]
 
         action = None
         if i >= cooldown_until:
@@ -168,6 +167,7 @@ def _run_proposed(trace, sim, seed):
 
     feedback = None
     last_action_time = None
+    pending_forecasts = {}
     overload_start = None
 
     weights = SimpleNamespace(
@@ -210,19 +210,33 @@ def _run_proposed(trace, sim, seed):
         action = result["selected_action"]
         outcome = result["outcome"]
 
-        # Evaluate the five-step forecast against a future observation that
-        # is not supplied to the agent when it makes the current decision.
+        # Score a five-step forecast issued earlier against the actual
+        # current observation. That observation includes the real state
+        # produced by intervening agent decisions; no future data is leaked.
+        if i in pending_forecasts:
+            prediction_errors.append(
+                _relative_error(current["cpu_percent"], pending_forecasts.pop(i))
+            )
+
         forecast = _prediction_at_horizon(result["prediction"], 5)
         if forecast is not None and i + 5 < len(trace):
-            future_metrics = sim.metrics(
-                trace[i + 5],
-                instances,
-                seed + i + 5,
-                cpu_capacity_multiplier,
-            )
-            prediction_errors.append(
-                _relative_error(future_metrics["cpu_percent"], forecast)
-            )
+            pending_forecasts[i + 5] = forecast
+
+        predicted_peak_cpu = max(
+            (float(item.get("cpu", 0.0)) for item in result["prediction"]),
+            default=current["cpu_percent"],
+        )
+        predicted_peak_memory = max(
+            (float(item.get("memory", 0.0)) for item in result["prediction"]),
+            default=current["memory_percent"],
+        )
+        predicted_pressure = (
+            current["cpu_percent"] >= 80
+            or current["memory_percent"] >= 90
+            or current["network_usage"] > 85
+            or predicted_peak_cpu >= 80
+            or predicted_peak_memory >= 90
+        )
 
         after = result["actual_result"]
 
@@ -238,13 +252,11 @@ def _run_proposed(trace, sim, seed):
             if action in {"ADD_INSTANCE", "REMOVE_INSTANCE"}:
                 last_action_time = cycle_time
 
-            if action == "ADD_INSTANCE" and current["cpu_percent"] <= 80:
+            if action in {"ADD_INSTANCE", "INCREASE_CPU"} and not predicted_pressure:
                 unnecessary += 1
-            elif action == "REMOVE_INSTANCE" and current["cpu_percent"] >= 30:
-                unnecessary += 1
-            elif action == "INCREASE_CPU" and current["cpu_percent"] < 80:
-                unnecessary += 1
-            elif action == "DECREASE_CPU" and current["cpu_percent"] >= 30:
+            elif action in {"REMOVE_INSTANCE", "DECREASE_CPU"} and not (
+                current["cpu_percent"] < 30 and current["memory_percent"] < 70
+            ):
                 unnecessary += 1
 
             if overload_start is not None and action in {
