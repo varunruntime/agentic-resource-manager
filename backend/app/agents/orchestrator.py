@@ -7,7 +7,7 @@ from app.ml.predictor import DemandPredictor
 from app.agents.planning import PlanningAgent
 from app.agents.execution import ExecutionAgent
 from app.agents.evaluation import EvaluationAgent
-from app.policies.safety import validate
+from app.policies.safety import CRITICAL_WORKLOADS, validate
 from app.agents.reasoning import RuleBasedReasoningProvider
 
 
@@ -82,12 +82,30 @@ class AgentOrchestrator:
             state.get("instances", observation.get("instances", 2))
         )
         decision_time = now or datetime.utcnow()
+        workload_markers = (
+            state.get("workload_type"),
+            state.get("workload_priority"),
+            state.get("workload_name"),
+            observation.get("workload_type"),
+            observation.get("workload_priority"),
+            observation.get("workload_name"),
+        )
+        is_critical = (
+            critical is True
+            or state.get("critical") is True
+            or observation.get("critical") is True
+            or any(
+                str(marker).strip().lower() in CRITICAL_WORKLOADS
+                for marker in workload_markers
+                if marker is not None
+            )
+        )
         safety = validate(
             selected,
             current_instances,
             last_action_time=last_action_time,
             now=decision_time,
-            critical=critical,
+            critical=is_critical,
         )
 
         # 7. ACT only in simulation mode and only after safety approval.
