@@ -15,11 +15,11 @@ type Prediction = {
   mape: number;
 };
 
-type Metric = {
-  timestamp: string;
-  cpu_percent: number;
-  memory_percent: number;
-};
+type Metric = { timestamp: string; cpu_percent: number; memory_percent: number };
+function value(input: unknown, digits = 1) {
+  const n = Number(input);
+  return Number.isFinite(n) ? n.toFixed(digits) : "—";
+}
 
 export default function Predictions() {
   const [rows, setRows] = useState<Prediction[]>([]);
@@ -32,14 +32,14 @@ export default function Predictions() {
       api.get("/api/predictions/history"),
       api.get("/api/resources/history"),
     ]);
-    setRows(predictions.data);
-    setActualRows(history.data);
+    setRows(Array.isArray(predictions.data) ? predictions.data : []);
+    setActualRows(Array.isArray(history.data) ? history.data : []);
   }
 
   useEffect(() => {
     load().catch((err) => {
       console.error(err);
-      setError("Unable to load prediction history.");
+      setError("Unable to load prediction history. Check the backend connection.");
     });
   }, []);
 
@@ -51,10 +51,7 @@ export default function Predictions() {
         api.get("/api/resources/current"),
         api.get("/api/resources/history"),
       ]);
-      const observedHistory = history.data.length
-        ? history.data
-        : [current.data];
-
+      const observedHistory = history.data.length ? history.data : [current.data];
       await api.post("/api/agents/run", {
         history: observedHistory,
         state: current.data,
@@ -70,68 +67,79 @@ export default function Predictions() {
   }
 
   const latest = rows.slice(-4);
-
   return (
     <main>
-      <div className="mb-6 flex items-start justify-between">
+      <header className="page-head">
         <div>
-          <h1 className="text-3xl font-bold">Predictions</h1>
-          <p className="mt-1 text-slate-500">
-            Time-series forecasts with measured error metrics.
+          <div className="page-eyebrow">Forecast intelligence</div>
+          <h1 className="page-title">Resource Predictions</h1>
+          <p className="page-description">
+            Review time-series resource forecasts, confidence and CPU validation metrics from chronological holdout evaluation.
           </p>
         </div>
-        <button
-          disabled={busy}
-          onClick={run}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-white disabled:opacity-50"
-        >
-          {busy ? "Generating..." : "Generate Prediction"}
-        </button>
-      </div>
-
-      {error && (
-        <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+        <div className="page-actions">
+          <button type="button" disabled={busy} onClick={run} className="btn-primary">
+            {busy ? "Generating…" : "Generate prediction"}
+          </button>
         </div>
-      )}
+      </header>
 
-      <section className="mb-6 grid grid-cols-4 gap-4">
+      {error && <div role="alert" className="alert alert-error">{error}</div>}
+
+      <section className="metrics-grid" style={{ gridTemplateColumns: "repeat(4,minmax(0,1fr))", marginBottom: 16 }}>
         {latest.map((prediction) => (
-          <div key={prediction.id} className="rounded-xl border bg-white p-4">
-            <div className="text-sm text-slate-500">
-              {prediction.horizon_minutes} min forecast
+          <article className="metric-card" key={prediction.id}>
+            <div className="metric-top">
+              <span className="metric-label">{prediction.horizon_minutes}-minute CPU forecast</span>
+              <span className="metric-symbol">CPU</span>
             </div>
-            <div className="mt-1 text-2xl font-bold">
-              {Number(prediction.cpu_predicted).toFixed(1)}%
+            <div className="metric-value-row">
+              <span className="metric-value">{value(prediction.cpu_predicted)}</span>
+              <span className="metric-unit">%</span>
             </div>
-            <div className="mt-1 text-xs text-slate-500">
+            <div className="metric-detail">
               {Number(prediction.confidence) > 0
-                ? `Confidence ${Number(prediction.confidence).toFixed(2)}`
+                ? `Validation confidence ${value(prediction.confidence, 2)}`
                 : "Validation not available yet"}
             </div>
-          </div>
+          </article>
         ))}
+        {latest.length === 0 && (
+          <div className="panel p-5 text-xs text-slate-500" style={{ gridColumn: "1 / -1" }}>
+            No forecasts available yet. Generate a prediction after resource readings have been collected.
+          </div>
+        )}
       </section>
 
-      <section className="rounded-xl border bg-white p-5">
-        <h2 className="mb-3 font-semibold">Actual Historical CPU & Memory</h2>
+      <section className="panel panel-pad" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <div>
+            <h2 className="panel-title">Observed resource history</h2>
+            <p className="panel-subtitle">Actual CPU and memory measurements. Forecasts are listed separately below.</p>
+          </div>
+          <div className="chart-legend">
+            <span className="legend-item"><span className="legend-swatch" /> CPU</span>
+            <span className="legend-item"><span className="legend-swatch teal" /> Memory</span>
+          </div>
+        </div>
         <Chart data={actualRows} keys={["cpu_percent", "memory_percent"]} />
       </section>
 
-      <section className="mt-5 rounded-xl border bg-white p-5">
-        <h2 className="mb-1 font-semibold">CPU Forecast Quality</h2>
-        <p className="mb-4 text-xs text-slate-500">
-          MAE, RMSE and MAPE are calculated from chronological CPU holdout
-          predictions. Metrics are unavailable until at least four readings exist.
-        </p>
+      <section className="panel panel-pad">
+        <div className="panel-header">
+          <div>
+            <h2 className="panel-title">Forecast validation</h2>
+            <p className="panel-subtitle">MAE, RMSE and MAPE use chronological CPU holdout predictions.</p>
+          </div>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[780px]">
             <thead>
-              <tr className="border-b text-left text-slate-500">
-                <th className="py-2">Horizon</th>
-                <th>CPU</th>
-                <th>Memory</th>
-                <th>Workload</th>
+              <tr className="border-b text-left">
+                <th className="py-3">Horizon</th>
+                <th>CPU forecast</th>
+                <th>Memory forecast</th>
+                <th>Workload forecast</th>
                 <th>Confidence</th>
                 <th>CPU MAE</th>
                 <th>CPU RMSE</th>
@@ -140,27 +148,26 @@ export default function Predictions() {
             </thead>
             <tbody>
               {latest.map((prediction) => (
-                <tr key={prediction.id} className="border-b">
-                  <td className="py-2">{prediction.horizon_minutes} min</td>
-                  <td>{Number(prediction.cpu_predicted).toFixed(1)}%</td>
-                  <td>{Number(prediction.memory_predicted).toFixed(1)}%</td>
-                  <td>{Number(prediction.workload_predicted).toFixed(1)}</td>
-                  <td>{Number(prediction.confidence).toFixed(2)}</td>
-                  <td>{prediction.confidence > 0 ? Number(prediction.mae).toFixed(3) : "N/A"}</td>
-                  <td>{prediction.confidence > 0 ? Number(prediction.rmse).toFixed(3) : "N/A"}</td>
-                  <td>{prediction.confidence > 0 ? `${Number(prediction.mape).toFixed(2)}%` : "N/A"}</td>
+                <tr key={prediction.id} className="border-b last:border-0">
+                  <td className="py-3 font-semibold text-slate-700">{prediction.horizon_minutes} min</td>
+                  <td>{value(prediction.cpu_predicted)}%</td>
+                  <td>{value(prediction.memory_predicted)}%</td>
+                  <td>{value(prediction.workload_predicted)}</td>
+                  <td>{value(prediction.confidence, 2)}</td>
+                  <td>{prediction.confidence > 0 ? value(prediction.mae, 3) : "N/A"}</td>
+                  <td>{prediction.confidence > 0 ? value(prediction.rmse, 3) : "N/A"}</td>
+                  <td>{prediction.confidence > 0 ? value(prediction.mape, 2) + "%" : "N/A"}</td>
                 </tr>
               ))}
               {latest.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="py-6 text-center text-slate-500">
-                    No predictions recorded yet.
-                  </td>
-                </tr>
+                <tr><td colSpan={8} className="py-8 text-center text-slate-500">No prediction records yet.</td></tr>
               )}
             </tbody>
           </table>
         </div>
+        <p className="mt-4 border-t border-slate-100 pt-4 text-[10px] leading-5 text-slate-500">
+          Validation metrics remain unavailable until sufficient observed history exists. Confidence is not a guarantee of forecast correctness.
+        </p>
       </section>
     </main>
   );
