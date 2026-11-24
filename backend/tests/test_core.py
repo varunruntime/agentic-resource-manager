@@ -371,3 +371,76 @@ def test_orchestrator_rejects_scale_in_for_critical_workload():
     assert result["safety"]["approved"] is False
     assert result["outcome"] == "REJECTED"
     assert result["actual_result"]["instances"] == 2
+
+
+def test_password_hash_uses_pbkdf2_and_verifies_credentials():
+    from app.api.routes import _hash_password, _verify_password
+
+    encoded = _hash_password("correct horse battery staple")
+    assert encoded.startswith("pbkdf2_sha256$")
+    assert _verify_password("correct horse battery staple", encoded)
+    assert not _verify_password("wrong password", encoded)
+
+
+def test_password_verifier_keeps_legacy_demo_hashes_compatible():
+    import hashlib
+    from app.api.routes import _verify_password
+
+    salt = "legacy-salt"
+    digest = hashlib.sha256((salt + "demo-password").encode()).hexdigest()
+    assert _verify_password("demo-password", f"{salt}:{digest}")
+    assert not _verify_password("incorrect", f"{salt}:{digest}")
+
+
+def test_workload_runtime_advances_and_finishes_configured_trace():
+    from app.services.runtime import (
+        next_workload_load,
+        start_workload_simulation,
+    )
+
+    workload = SimpleNamespace(
+        id=99173,
+        workload_type="Increasing",
+        duration_seconds=4,
+        initial_load=25.0,
+        growth_rate=4.0,
+    )
+    start_workload_simulation(workload)
+    first = next_workload_load(workload)
+    second = next_workload_load(workload)
+    finished = next_workload_load(workload)
+
+    assert first is not None
+    assert second is not None
+    assert second != first
+    assert finished is None
+
+
+def test_api_request_rejects_invalid_weights_and_unsafe_mode():
+    from pydantic import ValidationError
+    from app.schemas.api import AgentRunRequest
+
+    state = {"cpu_percent": 40, "memory_percent": 50}
+    with pytest.raises(ValidationError):
+        AgentRunRequest(
+            state=state,
+            weights={"performance": 0.8, "cost": 0.8, "energy": 0.2, "utilization": 0.2},
+        )
+    with pytest.raises(ValidationError):
+        AgentRunRequest(state=state, mode="production")
+
+
+def test_workload_and_experiment_serializers_expose_stable_fields():
+    from app.api.routes import workload_dict, experiment_dict
+    workload = SimpleNamespace(
+        id=7, name="Spike", workload_type="Sudden Spike",
+        initial_load=30.0, growth_rate=2.0, duration_seconds=120,
+        current_load=45.0, active=True, created_at=datetime(2026, 1, 1),
+    )
+    experiment = SimpleNamespace(
+        id=9, name="Spike comparison", workload_type="Sudden Spike",
+        duration_seconds=60, seed=42, status="COMPLETED",
+    )
+    assert workload_dict(workload)["current_load"] == 45.0
+    assert workload_dict(workload)["active"] is True
+    assert experiment_dict(experiment)["status"] == "COMPLETED"
