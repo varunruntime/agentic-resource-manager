@@ -19,7 +19,21 @@ def seed_db(db):
         for n,v in [("MAX_INSTANCES",str(MAX_INSTANCES)),("MIN_INSTANCES",str(MIN_INSTANCES)),("MAX_SCALE_STEP",str(MAX_SCALE_STEP)),("COOLDOWN_SECONDS",str(COOLDOWN_SECONDS))]: db.add(Policy(name=n,value=v))
         db.commit()
 
-def metric_dict(m): return {k:getattr(m,k) for k in ["timestamp","cpu_percent","memory_percent","disk_percent","network_usage","active_workloads","instances","latency_ms","estimated_cost","estimated_energy"]}
+def metric_dict(m):
+    result = {
+        key: getattr(m, key)
+        for key in [
+            "timestamp", "cpu_percent", "memory_percent", "disk_percent",
+            "network_usage", "active_workloads", "instances", "latency_ms",
+            "estimated_cost", "estimated_energy",
+        ]
+    }
+    # Preserve simulated CPU allocation across API cycles without adding a
+    # database column: estimated_cost encodes 0.10 * instances * multiplier.
+    result["cpu_capacity_multiplier"] = (
+        float(m.estimated_cost) / max(0.10 * int(m.instances), 1e-9)
+    )
+    return result
 
 @router.post("/auth/register",response_model=AuthResponse)
 def register(req:AuthRequest,db:Session=Depends(get_db)):
@@ -73,12 +87,56 @@ def prediction_history(db:Session=Depends(get_db)): return [p.__dict__ for p in 
 
 @router.post("/agents/run")
 def run_agent(req: AgentRunRequest, db: Session = Depends(get_db)):
+    # Rehydrate the previous cycle's measured feedback from persisted evaluation.
+    previous_decision = (
+        db.query(AgentDecision)
+        .order_by(AgentDecision.id.desc())
+        .first()
+    )
+    feedback = None
+    if previous_decision is not None:
+        previous_evaluation = (
+            db.query(EvaluationResult)
+            .filter_by(decision_id=previous_decision.id)
+            .first()
+        )
+        if previous_evaluation is not None:
+            feedback = {
+                "selected_action": previous_decision.action,
+                "outcome": previous_decision.outcome,
+                "cpu_improvement": previous_evaluation.cpu_improvement,
+                "memory_improvement": previous_evaluation.memory_improvement,
+                "latency_improvement": previous_evaluation.latency_improvement,
+                "cost_change": previous_evaluation.cost_change,
+                "energy_change": previous_evaluation.energy_change,
+                "slo_impact": previous_evaluation.slo_impact,
+            }
+
+    # Rehydrate the last successful instance-scaling time for cooldown checks.
+    last_scaling_decision = (
+        db.query(AgentDecision)
+        .filter(
+            AgentDecision.action.in_(("ADD_INSTANCE", "REMOVE_INSTANCE")),
+            AgentDecision.outcome == "SUCCESS",
+        )
+        .order_by(AgentDecision.id.desc())
+        .first()
+    )
+    last_action_time = (
+        last_scaling_decision.timestamp
+        if last_scaling_decision is not None
+        else None
+    )
+    now = datetime.utcnow()
 
     result = AgentOrchestrator(db, settings).run(
         history=req.history,
         state=req.state,
         weights=req.weights,
-        mode=req.mode
+        mode=req.mode,
+        feedback=feedback,
+        last_action_time=last_action_time,
+        now=now,
     )
 
     for p in result["prediction"]:
