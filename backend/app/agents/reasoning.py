@@ -1,4 +1,3 @@
-
 class RuleBasedReasoningProvider:
 
     def reason(self, obs, prediction, analysis, feedback=None):
@@ -15,26 +14,24 @@ class RuleBasedReasoningProvider:
             (float(p.get("cpu", 0)) for p in prediction),
             default=cpu
         )
-
         predicted_memory = max(
             (float(p.get("memory", 0)) for p in prediction),
             default=memory
         )
 
+        # Keep this threshold aligned with PlanningAgent's predicted-pressure
+        # threshold so a forecast at/above 80% produces actionable candidates.
         high_pressure = (
             cpu >= 80
             or memory >= 90
             or network > 85
-            or predicted_cpu >= 85
+            or predicted_cpu >= 80
             or predicted_memory >= 90
         )
-
         underutilized = cpu < 30 and memory < 70
 
-        actions = []
-
         if high_pressure:
-            actions.extend([
+            actions = [
                 {
                     "action": "ADD_INSTANCE",
                     "delta": 1,
@@ -59,10 +56,9 @@ class RuleBasedReasoningProvider:
                     "estimated_cost": 0.0,
                     "estimated_energy": 0.0
                 }
-            ])
-
+            ]
         elif underutilized:
-            actions.extend([
+            actions = [
                 {
                     "action": "REMOVE_INSTANCE",
                     "delta": 1,
@@ -79,29 +75,25 @@ class RuleBasedReasoningProvider:
                     "estimated_cost": 0.0,
                     "estimated_energy": 0.0
                 }
-            ])
-
+            ]
         else:
-            actions.append({
-                "action": "DO_NOTHING",
-                "delta": 0,
-                "reason": "Resource pressure is within acceptable limits.",
-                "expected_effect": "Maintain current allocation.",
-                "estimated_cost": 0.0,
-                "estimated_energy": 0.0
-            })
+            actions = [
+                {
+                    "action": "DO_NOTHING",
+                    "delta": 0,
+                    "reason": "Resource pressure is within acceptable limits.",
+                    "expected_effect": "Maintain current allocation.",
+                    "estimated_cost": 0.0,
+                    "estimated_energy": 0.0
+                }
+            ]
 
-        # Read feedback from the previous cycle.
+        # Avoid repeating an unsuccessful or demonstrably harmful action.
         previous_action = None
-
         if feedback:
             outcome = feedback.get("outcome")
-            cpu_improvement = float(
-                feedback.get("cpu_improvement", 0)
-            )
-            latency_improvement = float(
-                feedback.get("latency_improvement", 0)
-            )
+            cpu_improvement = float(feedback.get("cpu_improvement", 0))
+            latency_improvement = float(feedback.get("latency_improvement", 0))
 
             if (
                 outcome in {"REJECTED", "FAILED"}
@@ -113,23 +105,21 @@ class RuleBasedReasoningProvider:
             ):
                 previous_action = feedback.get("selected_action")
 
-        # Avoid repeating the unsuccessful action.
         if previous_action:
             actions = [
                 action for action in actions
                 if action["action"] != previous_action
             ]
 
-        # Always keep at least one candidate.
         if not actions:
-            actions.append({
+            actions = [{
                 "action": "DO_NOTHING",
                 "delta": 0,
                 "reason": "Previous action failed. Avoid repeating it.",
                 "expected_effect": "Maintain current allocation.",
                 "estimated_cost": 0.0,
                 "estimated_energy": 0.0
-            })
+            }]
 
         return {
             "problem": analysis.get("reason", ", ".join(issues)),
@@ -148,6 +138,6 @@ class LLMReasoningProvider(RuleBasedReasoningProvider):
         self.api_key = api_key
 
     def reason(self, obs, prediction, analysis, feedback=None):
-        return super().reason(
-            obs, prediction, analysis, feedback
-        )
+        # The LLM provider remains a safe rule-based boundary until a validated
+        # structured LLM integration is explicitly implemented.
+        return super().reason(obs, prediction, analysis, feedback)
