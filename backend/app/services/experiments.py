@@ -111,7 +111,6 @@ def _run_baseline(trace, sim, seed):
                 trace[i + 5],
                 instances,
                 seed + i + 5,
-                cpu_capacity_multiplier,
             )
             prediction_errors.append(
                 _relative_error(
@@ -216,7 +215,8 @@ def _run_proposed(trace, sim, seed):
             future_metrics = sim.metrics(
                 trace[i + 5],
                 instances,
-                seed + i + 5
+                seed + i + 5,
+                cpu_capacity_multiplier,
             )
             prediction_errors.append(
                 _relative_error(future_metrics["cpu_percent"], forecast)
