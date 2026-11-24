@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 
-type AgentStatus = { llm_available?: boolean; [key: string]: unknown };
+type AgentStatus = { llm_available?: boolean; llm_configured?: boolean; [key: string]: unknown };
 export default function Settings() {
   const [status, setStatus] = useState<AgentStatus | undefined>();
   const [error, setError] = useState("");
@@ -17,7 +17,7 @@ export default function Settings() {
     { label: "Safety policy", value: "Enabled", detail: "Predefined actions are checked before simulated execution." },
     { label: "Orchestrator", value: "Nine-stage closed loop", detail: "Observe through feedback, with safety validation before action." },
     { label: "Active reasoning provider", value: "Rule-based", detail: "Deterministic reasoning is the configured default provider." },
-    { label: "External LLM integration", value: "Not connected", detail: "A live OpenAI/Gemini API call is not implemented in this version." },
+    { label: "External LLM integration", value: status?.llm_configured ? "API key configured · not invoked" : "Not configured · not invoked", detail: "The current build does not make a live OpenAI/Gemini API call; reasoning remains rule-based." },
   ];
 
   return (
@@ -46,7 +46,7 @@ export default function Settings() {
         </div>
         <div className="mt-5 border-t border-slate-100 pt-4 text-[10px] leading-5 text-slate-500">
           Agent status endpoint: {status ? "Connected" : "Waiting for status"}.
-          {status?.llm_available ? " LLM availability is reported by the backend, but the active provider remains rule-based in this build." : " No external LLM service is currently reported as available."}
+          {" The active provider is rule-based; API-key presence does not activate an external LLM call."}
         </div>
       </section>
     </main>
