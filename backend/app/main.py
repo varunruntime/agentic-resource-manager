@@ -44,6 +44,9 @@ async def metrics_socket(ws: WebSocket):
                         "latency_ms": float(m.latency_ms),
                         "estimated_cost": float(m.estimated_cost),
                         "estimated_energy": float(m.estimated_energy),
+                        "cpu_capacity_multiplier": (
+                            float(m.estimated_cost) / max(0.10 * int(m.instances), 1e-9)
+                        ),
                     })
 
             finally:
