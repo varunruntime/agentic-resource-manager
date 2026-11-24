@@ -347,6 +347,15 @@ def decisions(db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/decisions/export.csv")
+def export_csv(db: Session = Depends(get_db)):
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Decision ID", "Time", "Action", "Outcome", "Safety"])
+    for row in db.query(AgentDecision).order_by(AgentDecision.id.desc()).all():
+        writer.writerow([row.decision_id, row.timestamp, row.action, row.outcome, row.safety])
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=decision_logs.csv"})
+
 @router.get("/decisions/{id}")
 def decision(id: str, db: Session = Depends(get_db)):
     row = db.query(AgentDecision).filter_by(decision_id=id).first()
@@ -507,11 +516,3 @@ def metrics_history(db: Session = Depends(get_db)):
     return history(db)
 
 
-@router.get("/decisions/export.csv")
-def export_csv(db: Session = Depends(get_db)):
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["Decision ID", "Time", "Action", "Outcome", "Safety"])
-    for row in db.query(AgentDecision).order_by(AgentDecision.id.desc()).all():
-        writer.writerow([row.decision_id, row.timestamp, row.action, row.outcome, row.safety])
-    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=decision_logs.csv"})
