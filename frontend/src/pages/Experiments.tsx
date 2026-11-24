@@ -85,6 +85,8 @@ export default function Experiments() {
   async function viewExperiment(experiment: ExperimentSummary) {
     setError("");
     setType(experiment.workload_type);
+    setDuration(experiment.duration_seconds);
+    setSeed(experiment.seed);
     setSelectedId(experiment.id);
     setBusy(true);
     try {
