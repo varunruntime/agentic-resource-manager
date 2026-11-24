@@ -54,7 +54,7 @@ describe("Optimization page", () => {
     render(<Optimization />);
     fireEvent.click(screen.getByRole("button", { name: "Score candidate actions" }));
 
-    expect(await screen.findByText("ADD_INSTANCE")).toBeTruthy();
+    expect((await screen.findAllByText("ADD_INSTANCE")).length).toBeGreaterThan(0);
     expect(apiGet).toHaveBeenNthCalledWith(1, "/api/resources/current");
     expect(apiGet).toHaveBeenNthCalledWith(2, "/api/resources/history");
     expect(apiPost).toHaveBeenCalledWith("/api/agents/run", {
