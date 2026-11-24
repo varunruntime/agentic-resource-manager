@@ -105,7 +105,7 @@ export default function Experiments() {
           {busy ? "Running comparison..." : "Run Comparison"}
         </button>
         <span className="text-xs text-slate-500">
-          Duration: 60 simulated steps · Seed: 42
+          Duration: 60 simulated minutes · 1 step = 1 minute · Seed: 42
         </span>
       </section>
 
@@ -150,12 +150,12 @@ export default function Experiments() {
                   <th className="px-3 text-right">Latency (ms)</th>
                   <th className="px-3 text-right">Throughput</th>
                   <th className="px-3 text-right">Scaling</th>
-                  <th className="px-3 text-right">Reaction (steps)</th>
+                  <th className="px-3 text-right">Reaction (min)</th>
                   <th className="px-3 text-right">CPU Headroom</th>
                   <th className="px-3 text-right">SLO Violations</th>
                   <th className="px-3 text-right">Cost</th>
                   <th className="px-3 text-right">Energy</th>
-                  <th className="px-3 text-right">Forecast Score*</th>
+                  <th className="px-3 text-right">CPU Forecast Score*</th>
                   <th className="px-3 text-right">Unnecessary Actions</th>
                 </tr>
               </thead>
@@ -182,9 +182,10 @@ export default function Experiments() {
           </div>
 
           <p className="mt-4 text-xs text-slate-500">
-            * Forecast Score is the simulator's bounded 100 − MAPE comparison
-            score, not a classification accuracy measure. CPU Headroom is
-            calculated as 100 − average CPU utilization.
+            * CPU Forecast Score is the bounded 100 − CPU MAPE comparison
+            score, not classification accuracy. CPU Headroom is calculated
+            as 100 − average CPU utilization. Experiment samples represent one
+            simulated minute; cost, energy and throughput are simulator proxies.
           </p>
         </section>
       )}
