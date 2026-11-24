@@ -14,7 +14,7 @@ MAX_INSTANCES = 10
 MIN_INSTANCES = 1
 
 
-def _add_derived_metrics(metrics, instances):
+def _add_derived_metrics(metrics, instances, cpu_capacity_multiplier=1.0):
     result = dict(metrics)
     result["instances"] = instances
 
@@ -26,8 +26,9 @@ def _add_derived_metrics(metrics, instances):
         0.0,
         100.0 - result["latency_ms"] / 3.0
     )
-    result["estimated_cost"] = 0.10 * instances
-    result["estimated_energy"] = 0.18 * instances
+    result["cpu_capacity_multiplier"] = cpu_capacity_multiplier
+    result["estimated_cost"] = 0.10 * instances * cpu_capacity_multiplier
+    result["estimated_energy"] = 0.18 * instances * cpu_capacity_multiplier
 
     return result
 
@@ -109,7 +110,8 @@ def _run_baseline(trace, sim, seed):
             future_metrics = sim.metrics(
                 trace[i + 5],
                 instances,
-                seed + i + 5
+                seed + i + 5,
+                cpu_capacity_multiplier,
             )
             prediction_errors.append(
                 _relative_error(
@@ -155,6 +157,7 @@ def _run_baseline(trace, sim, seed):
 
 def _run_proposed(trace, sim, seed):
     instances = 2
+    cpu_capacity_multiplier = 1.0
     actions = 0
     unnecessary = 0
     history = []
@@ -177,8 +180,9 @@ def _run_proposed(trace, sim, seed):
 
     for i, load in enumerate(trace):
         current = _add_derived_metrics(
-            sim.metrics(load, instances, seed + i),
-            instances
+            sim.metrics(load, instances, seed + i, cpu_capacity_multiplier),
+            instances,
+            cpu_capacity_multiplier,
         )
         history.append(dict(current))
 
@@ -249,7 +253,8 @@ def _run_proposed(trace, sim, seed):
                 overload_start = None
 
         instances = int(after.get("instances", instances))
-        values.append(_add_derived_metrics(after, instances))
+        cpu_capacity_multiplier = float(after.get("cpu_capacity_multiplier", cpu_capacity_multiplier))
+        values.append(_add_derived_metrics(after, instances, cpu_capacity_multiplier))
 
         # Carry this cycle's feedback into the next cycle.
         feedback = result["feedback"]
