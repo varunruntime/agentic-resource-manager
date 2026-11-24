@@ -400,7 +400,20 @@ def decision(id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/actions")
-def actions(db:Session=Depends(get_db)): return [a.__dict__ for a in db.query(CandidateAction).order_by(CandidateAction.id.desc()).limit(100).all()]
+def actions(db: Session = Depends(get_db)):
+    rows = db.query(CandidateAction).order_by(CandidateAction.id.desc()).limit(100).all()
+    return [
+        {
+            "id": row.id,
+            "decision_id": row.decision.decision_id if row.decision else None,
+            "action": row.action,
+            "reason": row.reason,
+            "expected_effect": row.expected_effect,
+            "estimated_cost": row.estimated_cost,
+            "score": row.score,
+        }
+        for row in rows
+    ]
 
 @router.get("/experiments")
 def experiments(db: Session = Depends(get_db)):
