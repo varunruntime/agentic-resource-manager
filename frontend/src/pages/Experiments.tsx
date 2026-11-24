@@ -19,6 +19,7 @@ type ExperimentRow = {
 
 const scenarios = ["Stable", "Increasing", "Sudden Spike", "Decreasing", "Anomaly"];
 function number(value: unknown, digits = 1) {
+  if (value === null || value === undefined || value === "") return "—";
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed.toFixed(digits) : "—";
 }
