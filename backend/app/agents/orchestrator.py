@@ -65,20 +65,12 @@ class AgentOrchestrator:
         if feedback is not None:
             observation["previous_feedback"] = feedback
 
-        # ---------------------------------------------------------
-        # 2. PREDICT
-        # ---------------------------------------------------------
+       # 2. ANALYZE
+        analysis = self.analysis.analyze(observation)
+
+        # 3. PREDICT
         prediction_history = history if history else [observation]
-
         predictions = self.predictor.predict(prediction_history)
-
-        # ---------------------------------------------------------
-        # 3. ANALYZE
-        # ---------------------------------------------------------
-        analysis = self.analysis.analyze(
-            observation,
-            predictions,
-        )
 
         # ---------------------------------------------------------
         # 4. REASON
@@ -87,6 +79,7 @@ class AgentOrchestrator:
             observation,
             predictions,
             analysis,
+            feedback
         )
 
         # ---------------------------------------------------------
@@ -96,6 +89,7 @@ class AgentOrchestrator:
             reasoning["candidate_actions"],
             observation,
             weights,
+            predictions
         )
 
         selected = plan["selected"]

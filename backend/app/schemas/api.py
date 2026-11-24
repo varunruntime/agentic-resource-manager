@@ -18,6 +18,11 @@ class Weights(BaseModel):
     cost: float = 0.25
     energy: float = 0.20
     utilization: float = 0.15
+class AgentRunRequest(BaseModel):
+    history: list[dict[str, Any]]
+    state: dict[str, Any]
+    weights: Weights = Field(default_factory=Weights)
+    mode: str = "simulation"     
 class ExperimentCreate(BaseModel):
     name: str
     workload_type: str

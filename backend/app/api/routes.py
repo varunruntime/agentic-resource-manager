@@ -70,60 +70,104 @@ def latest_prediction(db:Session=Depends(get_db)):
 @router.get("/predictions/history")
 def prediction_history(db:Session=Depends(get_db)): return [p.__dict__ for p in db.query(Prediction).order_by(Prediction.id.desc()).limit(200).all()][::-1]
 
+
 @router.post("/agents/run")
-def run_agent(mode:str="simulation",weights:Weights=Weights(),db:Session=Depends(get_db)):
-    m=db.query(ResourceMetric).order_by(ResourceMetric.id.desc()).first()
-    if not m: current(db); m=db.query(ResourceMetric).order_by(ResourceMetric.id.desc()).first()
-    hist=[metric_dict(x) for x in db.query(ResourceMetric).order_by(ResourceMetric.id).limit(200).all()]
-    if len(hist)<3:
-        for i in range(10):
-            mm=ResourceMetric(cpu_percent=50+i*2,memory_percent=50+i,disk_percent=40,network_usage=30,active_workloads=2,instances=2,latency_ms=80,estimated_cost=.2,estimated_energy=.4); db.add(mm)
-        db.commit(); hist=[metric_dict(x) for x in db.query(ResourceMetric).order_by(ResourceMetric.id).limit(200).all()]
-        m=db.query(ResourceMetric).order_by(ResourceMetric.id.desc()).first()
-    state=metric_dict(m); result=AgentOrchestrator(db,settings).run(hist,state,weights,mode)
-    # Persist latest predictions and decision trace.
-    for p in result["prediction"]: db.add(Prediction(horizon_minutes=p["horizon"],cpu_predicted=p["cpu"],memory_predicted=p["memory"],workload_predicted=p["workload"],confidence=p["confidence"],mae=p["mae"],rmse=p["rmse"],mape=p["mape"]))
+def run_agent(req: AgentRunRequest, db: Session = Depends(get_db)):
+
+    result = AgentOrchestrator(db, settings).run(
+        history=req.history,
+        state=req.state,
+        weights=req.weights,
+        mode=req.mode
+    )
+
+    for p in result["prediction"]:
+        db.add(Prediction(
+            horizon_minutes=p["horizon"],
+            cpu_predicted=p["cpu"],
+            memory_predicted=p["memory"],
+            workload_predicted=p["workload"],
+            confidence=p["confidence"],
+            mae=p["mae"],
+            rmse=p["rmse"],
+            mape=p["mape"]
+        ))
+
     d = AgentDecision(
-    decision_id=result["decision_id"],
-    observation=json.dumps(result["observation"], default=str),
-    prediction=json.dumps(result["prediction"], default=str),
-    detected_problem=json.dumps(result["detected_problem"], default=str),
-    reasoning=json.dumps(result["reasoning"], default=str),
-    plan=json.dumps(result["plan"], default=str),
-    safety=json.dumps(result["safety"], default=str),
-    action=result["selected_action"],
-    evaluation=json.dumps(result["evaluation"], default=str),
-    outcome=result["outcome"]
-); db.add(d); db.flush()
-    for a in result["plan"]["alternatives"]+[result["plan"]["selected"]]: db.add(CandidateAction(decision_id=d.id,action=a["action"],reason=a["reason"],expected_effect=a["expected_effect"],estimated_cost=a["estimated_cost"],score=a["score"]))
+        decision_id=result["decision_id"],
+        observation=json.dumps(result["observation"], default=str),
+        prediction=json.dumps(result["prediction"], default=str),
+        detected_problem=json.dumps(result["detected_problem"], default=str),
+        reasoning=json.dumps(result["reasoning"], default=str),
+        plan=json.dumps(result["plan"], default=str),
+        safety=json.dumps(result["safety"], default=str),
+        action=result["selected_action"],
+        evaluation=json.dumps(result["evaluation"], default=str),
+        outcome=result["outcome"]
+    )
+
+    db.add(d)
+    db.flush()
+
+    for a in result["plan"]["alternatives"] + [result["plan"]["selected"]]:
+        db.add(CandidateAction(
+            decision_id=d.id,
+            action=a["action"],
+            reason=a["reason"],
+            expected_effect=a["expected_effect"],
+            estimated_cost=a["estimated_cost"],
+            score=a["score"]
+        ))
+
     db.add(ExecutedAction(
-    decision_id=d.id,
-    action=result["selected_action"],
-    mode=mode,
-    status=result["outcome"],
-    before_json=json.dumps(result["observation"], default=str),
-    after_json=json.dumps(result["actual_result"], default=str)
-))
-    ev=result["evaluation"]; db.add(EvaluationResult(decision_id=d.id,**ev));
-    after=result["actual_result"]; db.add(ResourceMetric(cpu_percent=after["cpu_percent"],memory_percent=after["memory_percent"],disk_percent=after.get("disk_percent",40),network_usage=after.get("network_usage",30),active_workloads=after.get("active_workloads",2),instances=after["instances"],latency_ms=after.get("latency_ms",80),estimated_cost=after.get("estimated_cost",.2),estimated_energy=after.get("estimated_energy",.4))); db.commit()
+        decision_id=d.id,
+        action=result["selected_action"],
+        mode=req.mode,
+        status=result["outcome"],
+        before_json=json.dumps(result["observation"], default=str),
+        after_json=json.dumps(result["actual_result"], default=str)
+    ))
+
+    db.add(EvaluationResult(
+        decision_id=d.id,
+        **result["evaluation"]
+    ))
+
+    after = result["actual_result"]
+
+    db.add(ResourceMetric(
+        cpu_percent=after["cpu_percent"],
+        memory_percent=after["memory_percent"],
+        disk_percent=after.get("disk_percent", 40),
+        network_usage=after.get("network_usage", 30),
+        active_workloads=after.get("active_workloads", 2),
+        instances=after["instances"],
+        latency_ms=after.get("latency_ms", 80),
+        estimated_cost=after.get("estimated_cost", 0.2),
+        estimated_energy=after.get("estimated_energy", 0.4)
+    ))
+
+    db.commit()
+
     return {
-    "decision_id": result["decision_id"],
-    "timestamp": result["timestamp"],
-    "observation": result["observation"],
-    "prediction": result["prediction"],
-    "detected_problem": result["detected_problem"],
-    "candidate_actions": (
-        result["plan"]["alternatives"]
-        + [result["plan"]["selected"]]
-    ),
-    "selected_action": result["selected_action"],
-    "reason": result["reasoning"]["reason"],
-    "safety": result["safety"],
-    "expected_result": result["plan"]["selected"]["expected_effect"],
-    "actual_result": result["actual_result"],
-    "feedback": result.get("feedback"),
-    "outcome": result["outcome"],
-}
+        "decision_id": result["decision_id"],
+        "timestamp": result["timestamp"],
+        "observation": result["observation"],
+        "prediction": result["prediction"],
+        "detected_problem": result["detected_problem"],
+        "candidate_actions": (
+            [result["plan"]["selected"]]
+            + result["plan"]["alternatives"]
+        ),
+        "selected_action": result["selected_action"],
+        "reason": result["reasoning"]["reason"],
+        "safety": result["safety"],
+        "expected_result": result["plan"]["selected"]["expected_effect"],
+        "actual_result": result["actual_result"],
+        "feedback": result.get("feedback"),
+        "outcome": result["outcome"]
+    }
+
 
 @router.get("/agents/status")
 def agent_status(): return {"orchestrator":"READY","mode":"SIMULATION","llm_available":bool(settings.llm_api_key),"safety":"ENABLED"}

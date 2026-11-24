@@ -17,7 +17,7 @@ class WorkloadSimulator:
             "periodic": "periodic",
             "anomaly": "anomaly",
             "anomalous": "anomaly",
-        }
+        } 
         kind = aliases.get(kind, kind)
         out = []
         for i in range(max(1, steps)):
