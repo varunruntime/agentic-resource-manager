@@ -105,7 +105,9 @@ export default function Predictions() {
               {Number(prediction.cpu_predicted).toFixed(1)}%
             </div>
             <div className="mt-1 text-xs text-slate-500">
-              Confidence {Number(prediction.confidence).toFixed(2)}
+              {Number(prediction.confidence) > 0
+                ? `Confidence ${Number(prediction.confidence).toFixed(2)}`
+                : "Validation not available yet"}
             </div>
           </div>
         ))}
@@ -117,7 +119,11 @@ export default function Predictions() {
       </section>
 
       <section className="mt-5 rounded-xl border bg-white p-5">
-        <h2 className="mb-4 font-semibold">Forecast Quality</h2>
+        <h2 className="mb-1 font-semibold">CPU Forecast Quality</h2>
+        <p className="mb-4 text-xs text-slate-500">
+          MAE, RMSE and MAPE are calculated from chronological CPU holdout
+          predictions. Metrics are unavailable until at least four readings exist.
+        </p>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -127,9 +133,9 @@ export default function Predictions() {
                 <th>Memory</th>
                 <th>Workload</th>
                 <th>Confidence</th>
-                <th>MAE</th>
-                <th>RMSE</th>
-                <th>MAPE</th>
+                <th>CPU MAE</th>
+                <th>CPU RMSE</th>
+                <th>CPU MAPE</th>
               </tr>
             </thead>
             <tbody>
@@ -140,9 +146,9 @@ export default function Predictions() {
                   <td>{Number(prediction.memory_predicted).toFixed(1)}%</td>
                   <td>{Number(prediction.workload_predicted).toFixed(1)}</td>
                   <td>{Number(prediction.confidence).toFixed(2)}</td>
-                  <td>{Number(prediction.mae).toFixed(3)}</td>
-                  <td>{Number(prediction.rmse).toFixed(3)}</td>
-                  <td>{Number(prediction.mape).toFixed(2)}%</td>
+                  <td>{prediction.confidence > 0 ? Number(prediction.mae).toFixed(3) : "N/A"}</td>
+                  <td>{prediction.confidence > 0 ? Number(prediction.rmse).toFixed(3) : "N/A"}</td>
+                  <td>{prediction.confidence > 0 ? `${Number(prediction.mape).toFixed(2)}%` : "N/A"}</td>
                 </tr>
               ))}
               {latest.length === 0 && (
