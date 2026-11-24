@@ -18,16 +18,21 @@ type Metrics = {
 
 type Decision = {
   decision_id?: string;
-  detected_problem?: {
-    reason?: string;
-  };
+  detected_problem?: { reason?: string };
   selected_action?: string;
-  safety?: {
-    approved?: boolean;
-    reason?: string;
-  };
+  safety?: { approved?: boolean; reason?: string };
   outcome?: string;
 };
+
+const pipeline = [
+  "Observe", "Analyze", "Predict", "Reason", "Plan",
+  "Safety check", "Act", "Evaluate", "Feedback",
+];
+
+function display(value: unknown, digits = 1) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed.toFixed(digits) : "—";
+}
 
 export default function Dashboard() {
   const [m, setM] = useState<Metrics>({});
@@ -41,34 +46,32 @@ export default function Dashboard() {
       api.get("/api/resources/current"),
       api.get("/api/resources/history"),
     ]);
-
     setM(current.data);
-    setH(history.data);
+    setH(Array.isArray(history.data) ? history.data : []);
     return {
       state: current.data as Metrics,
-      history: history.data as Metrics[],
+      history: (Array.isArray(history.data) ? history.data : []) as Metrics[],
     };
   }
 
   useEffect(() => {
     load().catch((err) => {
       console.error("Failed to load resource metrics:", err);
-      setError("Unable to load resource metrics. Check the backend connection.");
+      setError("Unable to load resource metrics. Check that the backend is running.");
     });
 
     const ws = new WebSocket(
       (import.meta.env.VITE_WS_URL || "ws://localhost:8000") + "/ws/metrics"
     );
-
     ws.onmessage = (event) => {
       try {
-        const incoming = JSON.parse(event.data);
+        const incoming = JSON.parse(event.data) as Metrics;
         setM((previous) => ({ ...previous, ...incoming }));
+        setH((previous) => [...previous, incoming].slice(-100));
       } catch (err) {
         console.error("Invalid WebSocket data:", err);
       }
     };
-
     ws.onerror = (err) => console.error("WebSocket error:", err);
     return () => ws.close();
   }, []);
@@ -78,100 +81,127 @@ export default function Dashboard() {
     setError("");
     try {
       const snapshot = await load();
-      const history = snapshot.history.length
-        ? snapshot.history
-        : [snapshot.state];
-
+      const history = snapshot.history.length ? snapshot.history : [snapshot.state];
       const response = await api.post("/api/agents/run", {
         history,
         state: snapshot.state,
         mode: "simulation",
       });
-
       setDecision(response.data);
       await load();
     } catch (err) {
       console.error("Agent cycle failed:", err);
-      setError("Agent cycle failed. Check the API connection and request details.");
+      setError("Agent cycle failed. Check the API connection and backend logs.");
     } finally {
       setRunning(false);
     }
   }
 
   const cards = [
-    ["CPU", m.cpu_percent, "%"],
-    ["RAM", m.memory_percent, "%"],
-    ["Network", m.network_usage, "%"],
-    ["Active Workloads", m.active_workloads, ""],
-    ["Instances", m.instances, ""],
-    ["Latency", m.latency_ms, "ms"],
-    ["Estimated Cost", m.estimated_cost, ""],
-    ["Energy", m.estimated_energy, ""],
-    ["Agent Status", "READY", ""],
+    { label: "CPU utilization", value: display(m.cpu_percent), unit: "%", symbol: "CPU", detail: "Current compute load" },
+    { label: "Memory utilization", value: display(m.memory_percent), unit: "%", symbol: "RAM", detail: "Current memory pressure" },
+    { label: "Disk utilization", value: display(m.disk_percent), unit: "%", symbol: "DSK", detail: "Observed disk usage" },
+    { label: "Active workloads", value: display(m.active_workloads, 0), unit: "", symbol: "JOB", detail: "Running workload count" },
+    { label: "Compute instances", value: display(m.instances, 0), unit: "", symbol: "INS", detail: "Allocated simulator capacity" },
+    { label: "Observed latency", value: display(m.latency_ms), unit: "ms", symbol: "LAT", detail: "Latest response-time proxy" },
   ];
+
+  const approved = decision?.safety?.approved;
+  const updatedAt = m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : "Awaiting telemetry";
 
   return (
     <main>
-      <div className="mb-6 flex justify-between">
+      <header className="page-head">
         <div>
-          <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-slate-500">
-            Closed-loop computing resource management
+          <div className="page-eyebrow">System overview</div>
+          <h1 className="page-title">Resource Dashboard</h1>
+          <p className="page-description">
+            Monitor simulated infrastructure, inspect resource pressure, and run the closed-loop agent safely.
           </p>
         </div>
-
-        <button
-          onClick={run}
-          disabled={running}
-          className="rounded-lg bg-indigo-600 px-5 py-3 text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {running ? "Running Agent..." : "Run Agent Cycle"}
-        </button>
-      </div>
-
-      {error && (
-        <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+        <div className="page-actions">
+          <button type="button" onClick={run} disabled={running} className="btn-primary">
+            <span aria-hidden="true">↻</span>
+            {running ? "Agent running…" : "Run agent cycle"}
+          </button>
         </div>
-      )}
+      </header>
 
-      <div className="mb-6 grid grid-cols-3 gap-4">
-        {cards.map(([label, value, unit]) => (
-          <MetricCard
-            key={label as string}
-            label={label as string}
-            value={
-              typeof value === "number" ? value.toFixed(1) : value ?? "—"
-            }
-            unit={unit as string}
-          />
-        ))}
+      {error && <div role="alert" className="alert alert-error">{error}</div>}
+
+      <div className="status-strip">
+        <div className="status-item"><span className="status-pulse" /> <strong>System ready</strong></div>
+        <div className="status-item">Execution <strong>Simulation only</strong></div>
+        <div className="status-item">Safety policy <strong>Enabled</strong></div>
+        <div className="status-item">Latest telemetry <strong>{updatedAt}</strong></div>
       </div>
 
-      <section className="rounded-xl border bg-white p-5">
-        <h2 className="mb-3 font-semibold">Live Resource Metrics</h2>
-        <Chart data={h} keys={["cpu_percent", "memory_percent"]} />
+      <section className="metrics-grid" aria-label="Current resource metrics">
+        {cards.map((card) => <MetricCard key={card.label} {...card} />)}
       </section>
 
-      {decision && (
-        <section className="mt-5 rounded-xl border bg-white p-5">
-          <h2 className="font-semibold">
-            Latest Decision: {decision.decision_id}
-          </h2>
-          <p className="mt-2">
-            Problem: {decision.detected_problem?.reason || "No problem detected"}
-          </p>
-          <p>
-            Selected action: <b>{decision.selected_action || "DO_NOTHING"}</b>
-          </p>
-          <p>
-            Safety: {decision.safety?.approved ? "APPROVED" : "REJECTED"}
-            {" — "}
-            {decision.safety?.reason || "No safety information"}
-          </p>
-          <p>Outcome: {decision.outcome || "UNKNOWN"}</p>
+      <div className="dashboard-grid">
+        <section className="panel panel-pad">
+          <div className="panel-header">
+            <div>
+              <h2 className="panel-title">Resource utilization</h2>
+              <p className="panel-subtitle">Live CPU and memory observations from the simulator</p>
+            </div>
+            <div className="chart-legend">
+              <span className="legend-item"><span className="legend-swatch" /> CPU</span>
+              <span className="legend-item"><span className="legend-swatch teal" /> Memory</span>
+            </div>
+          </div>
+          <Chart data={h} keys={["cpu_percent", "memory_percent"]} />
         </section>
-      )}
+
+        <section className="panel panel-pad">
+          <div className="panel-header">
+            <div>
+              <h2 className="panel-title">System overview</h2>
+              <p className="panel-subtitle">Additional operational indicators</p>
+            </div>
+          </div>
+          <div className="overview-list">
+            <div className="overview-row"><span className="overview-label">Network usage</span><span className="overview-value">{display(m.network_usage)}%</span></div>
+            <div className="overview-row"><span className="overview-label">Estimated cost</span><span className="overview-value">{display(m.estimated_cost, 3)}</span></div>
+            <div className="overview-row"><span className="overview-label">Estimated energy</span><span className="overview-value">{display(m.estimated_energy, 3)}</span></div>
+            <div className="overview-row"><span className="overview-label">Allocated instances</span><span className="overview-value">{display(m.instances, 0)}</span></div>
+          </div>
+          <div className="decision-box">
+            <div className="decision-box-label">Latest agent outcome</div>
+            <div className="decision-box-action">{decision?.selected_action || "No action executed yet"}</div>
+            <div className="decision-box-copy">
+              {decision
+                ? (decision.detected_problem?.reason || decision.outcome || "Agent cycle completed.")
+                : "Run an agent cycle to inspect the selected action and its safety result."}
+            </div>
+            {decision && (
+              <div className={"decision-box-copy " + (approved === true ? "value-good" : approved === false ? "" : "value-neutral")}>
+                Safety: {approved === true ? "Approved" : approved === false ? "Rejected" : "Not reported"}{decision.safety?.reason ? " · " + decision.safety.reason : ""}
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+
+      <section className="panel pipeline-panel">
+        <div className="panel-header">
+          <div>
+            <h2 className="panel-title">Agentic decision pipeline</h2>
+            <p className="panel-subtitle">Nine stages in the closed-loop resource management cycle</p>
+          </div>
+          <span className="topbar-chip safety"><span className="chip-dot" /> SAFETY GATED</span>
+        </div>
+        <div className="pipeline-grid">
+          {pipeline.map((stage, index) => (
+            <div className="pipeline-step" key={stage}>
+              <span className="pipeline-number">{String(index + 1).padStart(2, "0")}</span>
+              <span className="pipeline-name">{stage}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </main>
   );
 }
