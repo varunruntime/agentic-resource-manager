@@ -1,4 +1,4 @@
-import csv, io, json, secrets
+import csv, io, json, secrets, hashlib, hmac
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -9,6 +9,7 @@ from app.schemas.api import *
 from app.core.config import settings
 from app.services.simulator import WorkloadSimulator
 from app.services.experiments import run_comparison
+from app.services.runtime import start_workload_simulation, stop_workload_simulation
 from app.agents.orchestrator import AgentOrchestrator
 from app.policies.safety import *
 
@@ -35,22 +36,93 @@ def metric_dict(m):
     )
     return result
 
-@router.post("/auth/register",response_model=AuthResponse)
-def register(req:AuthRequest,db:Session=Depends(get_db)):
-    if db.query(User).filter_by(username=req.username).first(): raise HTTPException(409,"Username already exists")
-    # For a student demo, token auth is intentionally simple; password is salted with a process-safe random salt.
-    import hashlib
-    salt=secrets.token_hex(16); ph=f"{salt}:{hashlib.sha256((salt+req.password).encode()).hexdigest()}"
-    db.add(User(username=req.username,password_hash=ph)); db.commit(); return {"token":secrets.token_urlsafe(24)}
 
-@router.post("/auth/login",response_model=AuthResponse)
-def login(req:AuthRequest,db:Session=Depends(get_db)):
-    import hashlib
-    u=db.query(User).filter_by(username=req.username).first()
-    if not u: raise HTTPException(401,"Invalid credentials")
-    salt,digest=u.password_hash.split(":",1)
-    if hashlib.sha256((salt+req.password).encode()).hexdigest()!=digest: raise HTTPException(401,"Invalid credentials")
-    return {"token":secrets.token_urlsafe(24)}
+def _hash_password(password: str) -> str:
+    """PBKDF2-SHA256 password hash using a per-user random salt."""
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 260_000)
+    return "pbkdf2_sha256$260000$" + salt.hex() + "$" + digest.hex()
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    # Continue to accept the earlier salted SHA-256 format for existing demo DBs.
+    if stored.startswith("pbkdf2_sha256$"):
+        try:
+            _, iterations, salt_hex, digest_hex = stored.split("$", 3)
+            calculated = hashlib.pbkdf2_hmac(
+                "sha256", password.encode("utf-8"),
+                bytes.fromhex(salt_hex), int(iterations)
+            ).hex()
+            return hmac.compare_digest(calculated, digest_hex)
+        except (ValueError, TypeError):
+            return False
+    try:
+        salt, digest = stored.split(":", 1)
+        calculated = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+        return hmac.compare_digest(calculated, digest)
+    except (ValueError, TypeError):
+        return False
+
+
+def workload_dict(workload):
+    return {
+        "id": workload.id,
+        "name": workload.name,
+        "workload_type": workload.workload_type,
+        "initial_load": workload.initial_load,
+        "growth_rate": workload.growth_rate,
+        "duration_seconds": workload.duration_seconds,
+        "current_load": workload.current_load,
+        "active": workload.active,
+        "created_at": workload.created_at,
+    }
+
+
+def prediction_dict(prediction):
+    return {
+        "id": prediction.id,
+        "timestamp": prediction.timestamp,
+        "horizon_minutes": prediction.horizon_minutes,
+        "cpu_predicted": prediction.cpu_predicted,
+        "memory_predicted": prediction.memory_predicted,
+        "workload_predicted": prediction.workload_predicted,
+        "confidence": prediction.confidence,
+        "mae": prediction.mae,
+        "rmse": prediction.rmse,
+        "mape": prediction.mape,
+    }
+
+
+def experiment_dict(experiment):
+    return {
+        "id": experiment.id,
+        "name": experiment.name,
+        "workload_type": experiment.workload_type,
+        "duration_seconds": experiment.duration_seconds,
+        "seed": experiment.seed,
+        "status": experiment.status,
+    }
+
+
+@router.post("/auth/register", response_model=AuthResponse)
+def register(req: AuthRequest, db: Session = Depends(get_db)):
+    username = req.username.strip()
+    if not username or not req.password:
+        raise HTTPException(422, "Username and password are required")
+    if db.query(User).filter_by(username=username).first():
+        raise HTTPException(409, "Username already exists")
+    db.add(User(username=username, password_hash=_hash_password(req.password)))
+    db.commit()
+    return {"token": secrets.token_urlsafe(32)}
+
+
+@router.post("/auth/login", response_model=AuthResponse)
+def login(req: AuthRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter_by(username=req.username.strip()).first()
+    if not user or not _verify_password(req.password, user.password_hash):
+        raise HTTPException(401, "Invalid credentials")
+    return {"token": secrets.token_urlsafe(32)}
+
 
 @router.get("/resources/current")
 def current(db:Session=Depends(get_db)):
@@ -63,26 +135,55 @@ def current(db:Session=Depends(get_db)):
 def history(db:Session=Depends(get_db)): return [metric_dict(m) for m in db.query(ResourceMetric).order_by(ResourceMetric.id.desc()).limit(200).all()][::-1]
 
 @router.post("/workloads")
-def create_workload(req:WorkloadCreate,db:Session=Depends(get_db)):
-    w=Workload(**req.model_dump(),current_load=req.initial_load); db.add(w); db.commit(); db.refresh(w); return w.__dict__
+def create_workload(req: WorkloadCreate, db: Session = Depends(get_db)):
+    workload = Workload(**req.model_dump(), current_load=req.initial_load)
+    db.add(workload)
+    db.commit()
+    db.refresh(workload)
+    return workload_dict(workload)
+
+
 @router.get("/workloads")
-def workloads(db:Session=Depends(get_db)): return [w.__dict__ for w in db.query(Workload).order_by(Workload.id.desc()).all()]
+def workloads(db: Session = Depends(get_db)):
+    return [
+        workload_dict(workload)
+        for workload in db.query(Workload).order_by(Workload.id.desc()).all()
+    ]
+
+
 @router.post("/workloads/{id}/start")
-def start_workload(id:int,db:Session=Depends(get_db)):
-    w=db.get(Workload,id)
-    if not w: raise HTTPException(404,"Workload not found")
-    w.active=True; db.commit(); return {"status":"STARTED","id":id}
+def start_workload(id: int, db: Session = Depends(get_db)):
+    workload = db.get(Workload, id)
+    if workload is None:
+        raise HTTPException(404, "Workload not found")
+    if not workload.active:
+        workload.active = True
+        workload.current_load = workload.initial_load
+        db.commit()
+        start_workload_simulation(workload)
+    return {"status": "STARTED", "id": id}
+
+
 @router.post("/workloads/{id}/stop")
-def stop_workload(id:int,db:Session=Depends(get_db)):
-    w=db.get(Workload,id)
-    if not w: raise HTTPException(404,"Workload not found")
-    w.active=False; db.commit(); return {"status":"STOPPED","id":id}
+def stop_workload(id: int, db: Session = Depends(get_db)):
+    workload = db.get(Workload, id)
+    if workload is None:
+        raise HTTPException(404, "Workload not found")
+    workload.active = False
+    db.commit()
+    stop_workload_simulation(id)
+    return {"status": "STOPPED", "id": id}
+
 
 @router.get("/predictions/latest")
-def latest_prediction(db:Session=Depends(get_db)):
-    return [p.__dict__ for p in db.query(Prediction).order_by(Prediction.id.desc()).limit(4).all()]
+def latest_prediction(db: Session = Depends(get_db)):
+    return [prediction_dict(p) for p in db.query(Prediction).order_by(Prediction.id.desc()).limit(4).all()]
+
+
 @router.get("/predictions/history")
-def prediction_history(db:Session=Depends(get_db)): return [p.__dict__ for p in db.query(Prediction).order_by(Prediction.id.desc()).limit(200).all()][::-1]
+def prediction_history(db: Session = Depends(get_db)):
+    rows = db.query(Prediction).order_by(Prediction.id.desc()).limit(200).all()
+    return [prediction_dict(p) for p in reversed(rows)]
 
 
 @router.post("/agents/run")
@@ -238,41 +339,154 @@ def agent_status():
         "safety": "ENABLED",
     }
 @router.get("/decisions")
-def decisions(db:Session=Depends(get_db)): return [{"decision_id":d.decision_id,"timestamp":d.timestamp,"action":d.action,"outcome":d.outcome} for d in db.query(AgentDecision).order_by(AgentDecision.id.desc()).limit(100).all()]
+def decisions(db: Session = Depends(get_db)):
+    rows = db.query(AgentDecision).order_by(AgentDecision.id.desc()).limit(100).all()
+    return [
+        {"decision_id": row.decision_id, "timestamp": row.timestamp, "action": row.action, "outcome": row.outcome}
+        for row in rows
+    ]
+
+
 @router.get("/decisions/{id}")
-def decision(id:str,db:Session=Depends(get_db)):
-    d=db.query(AgentDecision).filter_by(decision_id=id).first()
-    if not d: raise HTTPException(404,"Decision not found")
-    return {"decision_id":d.decision_id,"timestamp":d.timestamp,"observation":json.loads(d.observation),"prediction":json.loads(d.prediction),"detected_problem":json.loads(d.detected_problem),"reasoning":json.loads(d.reasoning),"plan":json.loads(d.plan),"safety":json.loads(d.safety),"action":d.action,"evaluation":json.loads(d.evaluation),"outcome":d.outcome}
+def decision(id: str, db: Session = Depends(get_db)):
+    row = db.query(AgentDecision).filter_by(decision_id=id).first()
+    if row is None:
+        raise HTTPException(404, "Decision not found")
+    executed = db.query(ExecutedAction).filter_by(decision_id=row.id).first()
+    candidates = db.query(CandidateAction).filter_by(decision_id=row.id).order_by(CandidateAction.score.desc()).all()
+    evaluation = db.query(EvaluationResult).filter_by(decision_id=row.id).first()
+    return {
+        "decision_id": row.decision_id,
+        "timestamp": row.timestamp,
+        "observation": json.loads(row.observation),
+        "prediction": json.loads(row.prediction),
+        "detected_problem": json.loads(row.detected_problem),
+        "reasoning": json.loads(row.reasoning),
+        "plan": json.loads(row.plan),
+        "candidate_actions": [
+            {"action": item.action, "reason": item.reason, "expected_effect": item.expected_effect,
+             "estimated_cost": item.estimated_cost, "score": item.score}
+            for item in candidates
+        ],
+        "safety": json.loads(row.safety),
+        "action": row.action,
+        "execution": ({
+            "mode": executed.mode, "status": executed.status,
+            "before": json.loads(executed.before_json), "after": json.loads(executed.after_json),
+        } if executed else None),
+        "evaluation": ({
+            "cpu_improvement": evaluation.cpu_improvement,
+            "memory_improvement": evaluation.memory_improvement,
+            "latency_improvement": evaluation.latency_improvement,
+            "cost_change": evaluation.cost_change,
+            "energy_change": evaluation.energy_change,
+            "resource_efficiency": evaluation.resource_efficiency,
+            "slo_impact": evaluation.slo_impact,
+        } if evaluation else json.loads(row.evaluation)),
+        "outcome": row.outcome,
+    }
+
+
 @router.get("/actions")
 def actions(db:Session=Depends(get_db)): return [a.__dict__ for a in db.query(CandidateAction).order_by(CandidateAction.id.desc()).limit(100).all()]
 
+@router.get("/experiments")
+def experiments(db: Session = Depends(get_db)):
+    rows = db.query(Experiment).order_by(Experiment.id.desc()).limit(100).all()
+    return [experiment_dict(row) for row in rows]
+
+
 @router.post("/experiments")
-def create_experiment(req:ExperimentCreate,db:Session=Depends(get_db)):
-    e=Experiment(**req.model_dump()); db.add(e); db.commit(); db.refresh(e); return e.__dict__
+def create_experiment(req: ExperimentCreate, db: Session = Depends(get_db)):
+    experiment = Experiment(**req.model_dump())
+    db.add(experiment)
+    db.commit()
+    db.refresh(experiment)
+    return experiment_dict(experiment)
+
+
 @router.post("/experiments/{id}/start")
-def start_experiment(id:int,db:Session=Depends(get_db)):
-    e=db.get(Experiment,id)
-    if not e: raise HTTPException(404,"Experiment not found")
-    e.status="RUNNING"; db.commit(); results=run_comparison(e.workload_type,e.duration_seconds,e.seed)
-    for r in results: db.add(ExperimentResult(experiment_id=e.id,**r))
-    e.status="COMPLETED"; db.commit(); return results
+def start_experiment(id: int, db: Session = Depends(get_db)):
+    experiment = db.get(Experiment, id)
+    if experiment is None:
+        raise HTTPException(404, "Experiment not found")
+    if experiment.status == "RUNNING":
+        raise HTTPException(409, "Experiment is already running")
+
+    db.query(ExperimentResult).filter_by(experiment_id=experiment.id).delete()
+    experiment.status = "RUNNING"
+    db.commit()
+    try:
+        results = run_comparison(experiment.workload_type, experiment.duration_seconds, experiment.seed)
+        if len(results) != 2 or {item.get("system") for item in results} != {"BASELINE", "PROPOSED"}:
+            raise ValueError("Experiment did not produce both controller results")
+        for result in results:
+            db.add(ExperimentResult(experiment_id=experiment.id, **result))
+        experiment.status = "COMPLETED"
+        db.commit()
+        return results
+    except Exception:
+        db.rollback()
+        failed = db.get(Experiment, id)
+        if failed is not None:
+            failed.status = "FAILED"
+            db.commit()
+        raise
+
+
 @router.get("/experiments/{id}")
-def experiment(id:int,db:Session=Depends(get_db)):
-    e=db.get(Experiment,id)
-    if not e: raise HTTPException(404,"Experiment not found")
-    return e.__dict__
+def experiment(id: int, db: Session = Depends(get_db)):
+    row = db.get(Experiment, id)
+    if row is None:
+        raise HTTPException(404, "Experiment not found")
+    return experiment_dict(row)
+
+
 @router.get("/experiments/{id}/results")
-def experiment_results(id:int,db:Session=Depends(get_db)): return [r.__dict__ for r in db.query(ExperimentResult).filter_by(experiment_id=id).all()]
+def experiment_results(id: int, db: Session = Depends(get_db)):
+    if db.get(Experiment, id) is None:
+        raise HTTPException(404, "Experiment not found")
+    return [
+        {
+            "id": row.id, "experiment_id": row.experiment_id, "system": row.system,
+            "avg_cpu": row.avg_cpu, "avg_memory": row.avg_memory, "latency": row.latency,
+            "throughput": row.throughput, "scaling_actions": row.scaling_actions,
+            "reaction_time": row.reaction_time, "resource_wastage": row.resource_wastage,
+            "slo_violations": row.slo_violations, "estimated_cost": row.estimated_cost,
+            "estimated_energy": row.estimated_energy, "prediction_accuracy": row.prediction_accuracy,
+            "unnecessary_actions": row.unnecessary_actions,
+        }
+        for row in db.query(ExperimentResult).filter_by(experiment_id=id).all()
+    ]
+
+
 @router.get("/metrics/summary")
-def summary(db:Session=Depends(get_db)):
-    hs=[metric_dict(x) for x in db.query(ResourceMetric).order_by(ResourceMetric.id.desc()).limit(50).all()]
-    if not hs: return {}
-    return {"avg_cpu":sum(x["cpu_percent"] for x in hs)/len(hs),"avg_memory":sum(x["memory_percent"] for x in hs)/len(hs),"latency":sum(x["latency_ms"] for x in hs)/len(hs),"estimated_cost":sum(x["estimated_cost"] for x in hs)/len(hs),"estimated_energy":sum(x["estimated_energy"] for x in hs)/len(hs)}
+def summary(db: Session = Depends(get_db)):
+    rows = db.query(ResourceMetric).order_by(ResourceMetric.id.desc()).limit(50).all()
+    if not rows:
+        return {"samples": 0, "avg_cpu": 0, "avg_memory": 0, "avg_latency": 0,
+                "estimated_cost": 0, "estimated_energy": 0}
+    count = len(rows)
+    return {
+        "samples": count,
+        "avg_cpu": sum(float(row.cpu_percent) for row in rows) / count,
+        "avg_memory": sum(float(row.memory_percent) for row in rows) / count,
+        "avg_latency": sum(float(row.latency_ms) for row in rows) / count,
+        "estimated_cost": sum(float(row.estimated_cost) for row in rows) / count,
+        "estimated_energy": sum(float(row.estimated_energy) for row in rows) / count,
+    }
+
+
 @router.get("/metrics/history")
-def metrics_history(db:Session=Depends(get_db)): return history(db)
+def metrics_history(db: Session = Depends(get_db)):
+    return history(db)
+
+
 @router.get("/decisions/export.csv")
-def export_csv(db:Session=Depends(get_db)):
-    out=io.StringIO(); w=csv.writer(out); w.writerow(["Decision ID","Time","Action","Outcome","Safety"])
-    for d in db.query(AgentDecision).order_by(AgentDecision.id.desc()).all(): w.writerow([d.decision_id,d.timestamp,d.action,d.outcome,d.safety])
-    return StreamingResponse(iter([out.getvalue()]),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=decision_logs.csv"})
+def export_csv(db: Session = Depends(get_db)):
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Decision ID", "Time", "Action", "Outcome", "Safety"])
+    for row in db.query(AgentDecision).order_by(AgentDecision.id.desc()).all():
+        writer.writerow([row.decision_id, row.timestamp, row.action, row.outcome, row.safety])
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=decision_logs.csv"})
