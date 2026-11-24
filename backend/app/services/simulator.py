@@ -32,8 +32,6 @@ class WorkloadSimulator:
                 load = max(0, initial - growth * i) + rng.uniform(-2, 2)
             elif kind == "sudden_spike":
                 spike_start = int(steps * 0.65)
-                # Push the spike beyond two-instance capacity so the
-                # baseline's 80% trigger is exercised consistently.
                 load = initial + (65 if i >= spike_start else 0) + rng.uniform(-2, 2)
             elif kind == "periodic":
                 load = initial + 25 * math.sin(i / 5) + rng.uniform(-2, 2)
@@ -48,10 +46,11 @@ class WorkloadSimulator:
 
         return out
 
-    def metrics(self, load, instances, seed=None):
+    def metrics(self, load, instances, seed=None, cpu_capacity_multiplier=1.0):
         return MonitoringAgent().observe_simulated(
             load,
             max(1, int(instances)),
             1,
-            seed
+            seed,
+            cpu_capacity_multiplier=cpu_capacity_multiplier,
         )
