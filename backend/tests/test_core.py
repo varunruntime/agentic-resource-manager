@@ -318,5 +318,31 @@ def test_prediction_metrics_are_flagged_unavailable_for_short_history():
         for _ in range(3)
     ]
     predictions = DemandPredictor().predict(history)
-    assert all(item["confidence"] == 0.25 for item in predictions)
+    assert all(item["confidence"] == 0.0 for item in predictions)
     assert all(item["mae"] == 0.0 for item in predictions)
+
+
+def test_predictor_horizons_follow_elapsed_minutes():
+    from datetime import datetime, timedelta
+
+    start = datetime(2026, 1, 1)
+    history = [
+        {
+            "timestamp": (start + timedelta(minutes=2 * index)).isoformat(),
+            "cpu_percent": 20.0 + 5.0 * index,
+            "memory_percent": 40.0 + 2.0 * index,
+            "active_workloads": 1 + index,
+        }
+        for index in range(10)
+    ]
+
+    predictions = DemandPredictor().predict(history, horizons=(1, 3))
+    assert predictions[0]["cpu"] == pytest.approx(67.5)
+    assert predictions[1]["cpu"] == pytest.approx(72.5)
+    assert predictions[0]["confidence"] > 0
+
+
+def test_orchestrator_does_not_claim_external_llm_support():
+    configured_settings = SimpleNamespace(llm_api_key="not-a-real-key")
+    orchestrator = AgentOrchestrator(None, configured_settings)
+    assert isinstance(orchestrator.reasoner, RuleBasedReasoningProvider)
