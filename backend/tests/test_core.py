@@ -283,3 +283,9 @@ def test_derived_metrics_preserves_post_action_values():
     assert result["throughput"] == 84.0
     assert result["estimated_cost"] == 0.30
     assert result["estimated_energy"] == 0.50
+
+
+def test_experiment_comparison_is_deterministic_for_same_seed():
+    first = run_comparison("Sudden Spike", duration=24, seed=123)
+    second = run_comparison("Sudden Spike", duration=24, seed=123)
+    assert first == second
