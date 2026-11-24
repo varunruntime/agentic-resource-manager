@@ -113,6 +113,11 @@ def test_agent_simulation_persists_full_decision_trace(client):
     assert body["evaluation"]
     assert body["feedback"]["selected_action"] == body["action"]
 
+    actions = client.get("/api/actions")
+    assert actions.status_code == 200
+    assert actions.json()
+    assert all("_sa_instance_state" not in item for item in actions.json())
+
 
 def test_agent_endpoint_rejects_unknown_execution_mode(client):
     response = client.post("/api/agents/run", json={
