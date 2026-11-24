@@ -50,7 +50,7 @@ export default function Chart({ data, keys }: ChartProps) {
             <Line
               type="monotone"
               dataKey={keys[0]}
-              name={keys[0].replaceAll("_", " ")}
+              name={keys[0].replace(/_/g, " ")}
               stroke="#4267d5"
               strokeWidth={2.4}
               dot={false}
@@ -62,7 +62,7 @@ export default function Chart({ data, keys }: ChartProps) {
             <Line
               type="monotone"
               dataKey={keys[1]}
-              name={keys[1].replaceAll("_", " ")}
+              name={keys[1].replace(/_/g, " ")}
               stroke="#0f9f8f"
               strokeWidth={2.4}
               dot={false}
