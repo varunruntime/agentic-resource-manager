@@ -14,6 +14,7 @@ from app.agents.planning import PlanningAgent
 from app.agents.execution import ExecutionAgent
 from app.agents.evaluation import EvaluationAgent
 from app.agents.orchestrator import AgentOrchestrator
+from app.ml.predictor import DemandPredictor
 from app.policies.safety import validate
 from app.services.experiments import run_comparison, _add_derived_metrics
 
@@ -289,3 +290,33 @@ def test_experiment_comparison_is_deterministic_for_same_seed():
     first = run_comparison("Sudden Spike", duration=24, seed=123)
     second = run_comparison("Sudden Spike", duration=24, seed=123)
     assert first == second
+
+
+def test_prediction_error_metrics_are_cpu_only():
+    history = [
+        {
+            "cpu_percent": float(index * 10),
+            "memory_percent": float((index * 37) % 100),
+            "active_workloads": float((index * index) % 7),
+        }
+        for index in range(10)
+    ]
+
+    predictions = DemandPredictor().predict(history)
+    assert len(predictions) == 4
+    # CPU is an exact linear series, so its chronological holdout error is
+    # effectively zero regardless of the differently-scaled memory/workload
+    # targets.
+    assert predictions[0]["mae"] < 1e-8
+    assert predictions[0]["rmse"] < 1e-8
+    assert predictions[0]["mape"] < 1e-8
+
+
+def test_prediction_metrics_are_flagged_unavailable_for_short_history():
+    history = [
+        {"cpu_percent": 20.0, "memory_percent": 50.0, "active_workloads": 1}
+        for _ in range(3)
+    ]
+    predictions = DemandPredictor().predict(history)
+    assert all(item["confidence"] == 0.25 for item in predictions)
+    assert all(item["mae"] == 0.0 for item in predictions)
