@@ -383,6 +383,18 @@ def decision(id: str, db: Session = Depends(get_db)):
             "resource_efficiency": evaluation.resource_efficiency,
             "slo_impact": evaluation.slo_impact,
         } if evaluation else json.loads(row.evaluation)),
+        "feedback": {
+            "selected_action": row.action,
+            "outcome": row.outcome,
+            **({
+                "cpu_improvement": evaluation.cpu_improvement,
+                "memory_improvement": evaluation.memory_improvement,
+                "latency_improvement": evaluation.latency_improvement,
+                "cost_change": evaluation.cost_change,
+                "energy_change": evaluation.energy_change,
+                "slo_impact": evaluation.slo_impact,
+            } if evaluation else json.loads(row.evaluation)),
+        },
         "outcome": row.outcome,
     }
 
