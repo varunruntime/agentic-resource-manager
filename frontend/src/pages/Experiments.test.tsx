@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { api } from "../lib/api";
 import Experiments from "./Experiments";
@@ -7,10 +7,12 @@ import Experiments from "./Experiments";
 vi.mock("../lib/api", () => ({
   api: {
     post: vi.fn(),
+    get: vi.fn(),
   },
 }));
 
 const apiPost = vi.mocked(api.post);
+const apiGet = vi.mocked(api.get);
 
 const baseline = {
   system: "BASELINE",
@@ -42,6 +44,10 @@ const proposed = {
   estimated_energy: 0.42,
   prediction_accuracy: 88.2,
 };
+
+beforeEach(() => {
+  apiGet.mockResolvedValue({ data: [] } as never);
+});
 
 afterEach(() => {
   cleanup();
