@@ -55,7 +55,7 @@ describe("Experiments page", () => {
       .mockResolvedValueOnce({ data: [baseline, proposed] } as never);
 
     render(<Experiments />);
-    fireEvent.click(screen.getByRole("button", { name: "Run Comparison" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run comparison" }));
 
     expect(await screen.findByText("Results: Sudden Spike")).toBeTruthy();
     expect(screen.getByText("BASELINE")).toBeTruthy();
@@ -82,7 +82,7 @@ describe("Experiments page", () => {
     apiPost.mockRejectedValueOnce(new Error("backend unavailable"));
 
     render(<Experiments />);
-    fireEvent.click(screen.getByRole("button", { name: "Run Comparison" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run comparison" }));
 
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(
