@@ -346,3 +346,28 @@ def test_orchestrator_does_not_claim_external_llm_support():
     configured_settings = SimpleNamespace(llm_api_key="not-a-real-key")
     orchestrator = AgentOrchestrator(None, configured_settings)
     assert isinstance(orchestrator.reasoner, RuleBasedReasoningProvider)
+
+
+def test_orchestrator_rejects_scale_in_for_critical_workload():
+    state = {
+        "cpu_percent": 20.0,
+        "memory_percent": 50.0,
+        "disk_percent": 40.0,
+        "network_usage": 10.0,
+        "active_workloads": 1,
+        "instances": 2,
+        "latency_ms": 40.0,
+        "estimated_cost": 0.2,
+        "estimated_energy": 0.36,
+        "workload_type": "payment",
+    }
+    result = AgentOrchestrator(None, SETTINGS).run(
+        history=[state],
+        state=state,
+        weights=WEIGHTS,
+        mode="simulation",
+    )
+    assert result["selected_action"] == "REMOVE_INSTANCE"
+    assert result["safety"]["approved"] is False
+    assert result["outcome"] == "REJECTED"
+    assert result["actual_result"]["instances"] == 2
