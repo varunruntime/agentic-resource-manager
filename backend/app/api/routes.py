@@ -7,7 +7,6 @@ from app.database.session import get_db
 from app.models.entities import *
 from app.schemas.api import *
 from app.core.config import settings
-from app.services.simulator import WorkloadSimulator
 from app.services.experiments import run_comparison
 from app.services.runtime import start_workload_simulation, stop_workload_simulation
 from app.agents.orchestrator import AgentOrchestrator
