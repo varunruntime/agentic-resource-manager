@@ -8,10 +8,7 @@ from app.agents.planning import PlanningAgent
 from app.agents.execution import ExecutionAgent
 from app.agents.evaluation import EvaluationAgent
 from app.policies.safety import validate
-from app.agents.reasoning import (
-    RuleBasedReasoningProvider,
-    LLMReasoningProvider,
-)
+from app.agents.reasoning import RuleBasedReasoningProvider
 
 
 class AgentOrchestrator:
@@ -21,11 +18,9 @@ class AgentOrchestrator:
         self.monitor = MonitoringAgent()
         self.analysis = AnalysisAgent()
         self.predictor = DemandPredictor()
-        self.reasoner = (
-            LLMReasoningProvider(settings.llm_api_key)
-            if settings.llm_api_key
-            else RuleBasedReasoningProvider()
-        )
+        # No external LLM API call is implemented yet. Keep the active
+        # provider deterministic and rule-based even when an API key is set.
+        self.reasoner = RuleBasedReasoningProvider()
         self.planner = PlanningAgent()
         self.execution = ExecutionAgent()
         self.evaluation = EvaluationAgent()
