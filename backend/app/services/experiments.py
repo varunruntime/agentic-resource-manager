@@ -8,8 +8,13 @@ from app.core.config import settings
 from app.policies.safety import COOLDOWN_SECONDS
 
 
-# Each experiment sample represents one simulated second.
-BASELINE_COOLDOWN = COOLDOWN_SECONDS
+# One experiment timestep represents one simulated minute. The same 60-second
+# safety cooldown therefore equals one experiment step.
+SIMULATION_STEP_SECONDS = 60
+BASELINE_COOLDOWN_STEPS = max(
+    1,
+    (COOLDOWN_SECONDS + SIMULATION_STEP_SECONDS - 1) // SIMULATION_STEP_SECONDS,
+)
 MAX_INSTANCES = 10
 MIN_INSTANCES = 1
 
@@ -89,6 +94,7 @@ def _prediction_at_horizon(predictions, horizon=5):
 
 def _run_baseline(trace, sim, seed):
     instances = 2
+    experiment_start = datetime(2026, 1, 1)
     cooldown_until = -1
     actions = 0
     unnecessary = 0
@@ -99,10 +105,14 @@ def _run_baseline(trace, sim, seed):
     overload_start = None
 
     for i, load in enumerate(trace):
+        cycle_time = experiment_start + timedelta(
+            seconds=i * SIMULATION_STEP_SECONDS
+        )
         current = _add_derived_metrics(
             sim.metrics(load, instances, seed + i),
             instances
         )
+        current["timestamp"] = cycle_time.isoformat()
 
         if current["cpu_percent"] > 80 and overload_start is None:
             overload_start = i
@@ -131,7 +141,7 @@ def _run_baseline(trace, sim, seed):
 
         if action:
             actions += 1
-            cooldown_until = i + BASELINE_COOLDOWN
+            cooldown_until = i + BASELINE_COOLDOWN_STEPS
 
             if overload_start is not None and action == "ADD_INSTANCE":
                 reaction_times.append(i - overload_start)
@@ -177,16 +187,17 @@ def _run_proposed(trace, sim, seed):
     experiment_start = datetime(2026, 1, 1)
 
     for i, load in enumerate(trace):
+        # One step is one simulated minute, matching the predictor horizons.
+        cycle_time = experiment_start + timedelta(
+            seconds=i * SIMULATION_STEP_SECONDS
+        )
         current = _add_derived_metrics(
             sim.metrics(load, instances, seed + i, cpu_capacity_multiplier),
             instances,
             cpu_capacity_multiplier,
         )
+        current["timestamp"] = cycle_time.isoformat()
         history.append(dict(current))
-
-        # Use a deterministic simulation clock so the same 60-second
-        # cooldown is enforced by the orchestrator in repeatable runs.
-        cycle_time = experiment_start + timedelta(seconds=i)
 
         # Run the actual nine-stage orchestrator. The first cycle receives
         # None; subsequent cycles receive the previous cycle's feedback.
@@ -286,7 +297,7 @@ def run_comparison(workload_type, duration, seed=42):
     Compare a threshold baseline with the actual nine-stage orchestrator.
 
     Both systems receive the same deterministic workload trace, seed,
-    initial instance count and one-second sample interval.
+    initial instance count and one-minute simulated sample interval.
     """
     sim = WorkloadSimulator()
     steps = max(10, int(duration))
