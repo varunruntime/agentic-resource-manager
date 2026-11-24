@@ -78,7 +78,7 @@ function App() {
               {runtime.connected ? (runtime.simulationMode ? "SIMULATION MODE" : "BACKEND ONLINE") : "BACKEND OFFLINE"}
             </span>
             <span className="topbar-chip safety">
-              <span className="chip-dot" />
+              <span className="chip-dot" style={{ background: runtime.connected ? "#18a58c" : "#d45c5c" }} />
               {runtime.connected ? `SAFETY ENABLED · ${runtime.reasoningProvider?.replace(/_/g, " ").toUpperCase()}` : "WAITING FOR API"}
             </span>
           </div>
