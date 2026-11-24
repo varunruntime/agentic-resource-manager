@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
+import { api } from "./lib/api";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
 import Experiments from "./pages/Experiments";
@@ -12,8 +13,41 @@ import Optimization from "./pages/Optimization";
 import Settings from "./pages/Settings";
 import AgentDecisions from "./pages/AgentDecisions";
 
+type RuntimeStatus = {
+  connected: boolean;
+  simulationMode?: boolean;
+  reasoningProvider?: string;
+};
+
 function App() {
   const [page, setPage] = useState("Dashboard");
+  const [runtime, setRuntime] = useState<RuntimeStatus>({ connected: false });
+
+  useEffect(() => {
+    let active = true;
+    const check = async () => {
+      try {
+        const [health, agent] = await Promise.all([
+          api.get("/health"),
+          api.get("/api/agents/status"),
+        ]);
+        if (!active) return;
+        setRuntime({
+          connected: health.data?.status === "ok",
+          simulationMode: Boolean(health.data?.simulation_mode),
+          reasoningProvider: agent.data?.reasoning_provider || "rule_based",
+        });
+      } catch {
+        if (active) setRuntime({ connected: false });
+      }
+    };
+    check();
+    const interval = setInterval(check, 15000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   let content;
   switch (page) {
@@ -39,8 +73,14 @@ function App() {
             <div className="topbar-title">Agentic Resource Control Workspace</div>
           </div>
           <div className="topbar-statuses" aria-label="Environment status">
-            <span className="topbar-chip"><span className="chip-dot" /> SIMULATION MODE</span>
-            <span className="topbar-chip safety"><span className="chip-dot" /> SAFETY ENABLED</span>
+            <span className="topbar-chip">
+              <span className="chip-dot" style={{ background: runtime.connected ? "#18a58c" : "#d45c5c" }} />
+              {runtime.connected ? (runtime.simulationMode ? "SIMULATION MODE" : "BACKEND ONLINE") : "BACKEND OFFLINE"}
+            </span>
+            <span className="topbar-chip safety">
+              <span className="chip-dot" />
+              {runtime.connected ? `SAFETY ENABLED · ${runtime.reasoningProvider?.replace(/_/g, " ").toUpperCase()}` : "WAITING FOR API"}
+            </span>
           </div>
         </header>
         <div className="page-content">{content}</div>
