@@ -18,17 +18,19 @@ def _add_derived_metrics(metrics, instances, cpu_capacity_multiplier=1.0):
     result = dict(metrics)
     result["instances"] = instances
 
-    result["latency_ms"] = max(
-        20.0,
-        120.0 * (result["cpu_percent"] / 70.0)
+    # Raw simulator readings do not contain derived metrics. Post-action
+    # readings do, and those measured values must not be overwritten here.
+    result.setdefault(
+        "latency_ms",
+        max(20.0, 120.0 * (result["cpu_percent"] / 70.0)),
     )
-    result["throughput"] = max(
-        0.0,
-        100.0 - result["latency_ms"] / 3.0
+    result.setdefault(
+        "throughput",
+        max(0.0, 100.0 - result["latency_ms"] / 3.0),
     )
-    result["cpu_capacity_multiplier"] = cpu_capacity_multiplier
-    result["estimated_cost"] = 0.10 * instances * cpu_capacity_multiplier
-    result["estimated_energy"] = 0.18 * instances * cpu_capacity_multiplier
+    result.setdefault("cpu_capacity_multiplier", cpu_capacity_multiplier)
+    result.setdefault("estimated_cost", 0.10 * instances * cpu_capacity_multiplier)
+    result.setdefault("estimated_energy", 0.18 * instances * cpu_capacity_multiplier)
 
     return result
 
