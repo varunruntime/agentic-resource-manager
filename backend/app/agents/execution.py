@@ -4,6 +4,9 @@ class ExecutionAgent:
     def simulate(self, action, state):
         before = dict(state)
         instances = max(1, int(state.get("instances", 2)))
+        cpu_capacity_multiplier = float(
+            state.get("cpu_capacity_multiplier", 1.0)
+        )
         name = action["action"]
         delta = max(1, int(action.get("delta", 1)))
 
@@ -22,9 +25,11 @@ class ExecutionAgent:
             memory *= factor
             latency *= factor
         elif name == "INCREASE_CPU":
+            cpu_capacity_multiplier = min(2.0, cpu_capacity_multiplier * (1.0 / 0.85))
             cpu *= 0.85
             latency *= 0.90
         elif name == "DECREASE_CPU":
+            cpu_capacity_multiplier = max(0.5, cpu_capacity_multiplier * 0.85)
             cpu *= 1.15
             latency *= 1.10
         elif name == "PRIORITIZE_WORKLOAD":
@@ -32,9 +37,10 @@ class ExecutionAgent:
 
         after = dict(state)
         after["instances"] = instances
+        after["cpu_capacity_multiplier"] = cpu_capacity_multiplier
         after["cpu_percent"] = max(0, min(100, cpu))
         after["memory_percent"] = max(0, min(100, memory))
         after["latency_ms"] = max(1, latency)
-        after["estimated_cost"] = max(0, 0.10 * instances)
-        after["estimated_energy"] = max(0, 0.18 * instances)
+        after["estimated_cost"] = max(0, 0.10 * instances * cpu_capacity_multiplier)
+        after["estimated_energy"] = max(0, 0.18 * instances * cpu_capacity_multiplier)
         return before, after
