@@ -1,0 +1,2 @@
+const items=['Dashboard','Resource Monitoring','Workloads','Predictions','Agent Decisions','Optimization','Experiments','Decision Logs','Settings'];
+export default function Sidebar({page,setPage}:{page:string,setPage:(x:string)=>void}){return <aside className="w-64 bg-slate-950 text-white min-h-screen p-5"><div className="text-xl font-bold mb-8">Agentic Resource AI</div>{items.map(x=><button key={x} onClick={()=>setPage(x)} className={`block w-full text-left px-3 py-2 rounded mb-1 ${page===x?'bg-indigo-600':'hover:bg-slate-800'}`}>{x}</button>)}</aside>}

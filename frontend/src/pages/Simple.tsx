@@ -1,0 +1,1 @@
+export default function Simple({title}:{title:string}){return <main><h1 className="text-3xl font-bold mb-2">{title}</h1><div className="bg-white border rounded-xl p-6 mt-6"><p>This module is connected to the same backend architecture. Use Dashboard for the live closed-loop demo and Experiments for baseline comparison.</p></div></main>}
