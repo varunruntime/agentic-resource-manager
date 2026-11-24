@@ -22,10 +22,12 @@ The experiment's PROPOSED system invokes the same `AgentOrchestrator` on every s
 
 - Simulation mode is the default. Recommendation mode does not execute actions.
 - The executor changes simulated resource state only; it does not provision or modify real cloud infrastructure.
+- Starting a workload advances a seeded workload trace; a two-second local telemetry loop persists observations to SQLite and streams them to Dashboard/Monitoring over WebSockets. Workload duration is wall-clock seconds in the local runtime; experiment duration remains simulated-minute steps.
+- The local workload trace cursor is held in process memory. Run one Uvicorn worker for the demo runtime; active workloads are reconstructed from the database when the API process starts.
 - Safety rules restrict action names, scaling deltas, instance bounds, critical workloads and cooldown.
 - No arbitrary shell commands are generated or executed.
 - No external LLM API call is currently implemented. The active reasoning provider is deterministic `RuleBasedReasoningProvider`, even if `LLM_API_KEY` is configured. The `LLMReasoningProvider` class is currently a safe rule-based adapter, not a live LLM integration.
-- The authentication endpoints are for local demonstration only. The returned demo token is not currently enforced as an API session. Do not expose this demo backend publicly or use it for real user accounts.
+- The authentication endpoints are for local demonstration only. New passwords use PBKDF2-SHA256; legacy salted SHA-256 demo records remain readable. The returned demo token is not currently enforced as an API session. Do not expose this demo backend publicly or use it for real user accounts.
 - Estimated cost, energy and throughput are simulator proxies, not actual cloud billing or measured power/requests-per-second.
 
 ## Experiment methodology
@@ -142,11 +144,12 @@ GitHub Actions runs the backend test suite and frontend build/tests on pushes to
 - `POST /api/agents/run`
 - `GET /api/agents/status`
 - `GET /api/decisions`
-- `GET /api/decisions/{id}`
+- `GET /api/decisions/{id}` (full reasoning, candidate ranking, safety, execution and evaluation detail)
 - `GET /api/actions`
 - `POST /api/experiments`
 - `POST /api/experiments/{id}/start`
 - `GET /api/experiments/{id}`
+- `GET /api/experiments` (saved experiment history)
 - `GET /api/experiments/{id}/results`
 - `GET /api/metrics/summary`
 - `GET /api/metrics/history`
