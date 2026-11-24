@@ -28,7 +28,11 @@ export default function Workloads() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 2500);
+    return () => clearInterval(interval);
+  }, []);
 
   async function create() {
     setBusy(true); setMessage(""); setError("");
@@ -83,14 +87,14 @@ export default function Workloads() {
             <input type="number" min="0" max="100" value={form.initial_load} onChange={e => setForm({ ...form, initial_load: Number(e.target.value) })} className="px-3 py-2" />
           </label>
           <label className="grid gap-2 text-[10px] font-bold text-slate-600">Growth rate
-            <input type="number" value={form.growth_rate} onChange={e => setForm({ ...form, growth_rate: Number(e.target.value) })} className="px-3 py-2" />
+            <input type="number" min="-100" max="100" value={form.growth_rate} onChange={e => setForm({ ...form, growth_rate: Number(e.target.value) })} className="px-3 py-2" />
           </label>
           <label className="grid gap-2 text-[10px] font-bold text-slate-600">Duration (seconds)
             <input type="number" min="1" value={form.duration_seconds} onChange={e => setForm({ ...form, duration_seconds: Number(e.target.value) })} className="px-3 py-2" />
           </label>
         </div>
         <div className="mt-4 flex items-center gap-3">
-          <button type="button" disabled={busy || !form.name.trim() || form.initial_load < 0 || form.initial_load > 100 || form.duration_seconds < 1} onClick={create} className="btn-primary">
+          <button type="button" disabled={busy || !form.name.trim() || form.initial_load < 0 || form.initial_load > 100 || form.duration_seconds < 1 || form.growth_rate < -100 || form.growth_rate > 100} onClick={create} className="btn-primary">
             {busy ? "Creating…" : "Create workload"}
           </button>
           <span className="text-[10px] text-slate-400">Runs in the local simulation environment.</span>
@@ -105,7 +109,7 @@ export default function Workloads() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px]">
             <thead><tr className="border-b text-left">
-              <th className="px-5 py-3">Name</th><th className="px-3 py-3">Pattern</th><th className="px-3 py-3">Initial load</th><th className="px-3 py-3">Growth</th><th className="px-3 py-3">Duration</th><th className="px-3 py-3">Status</th><th className="px-5 py-3 text-right">Action</th>
+              <th className="px-5 py-3">Name</th><th className="px-3 py-3">Pattern</th><th className="px-3 py-3">Initial load</th><th className="px-3 py-3">Current load</th><th className="px-3 py-3">Growth</th><th className="px-3 py-3">Duration</th><th className="px-3 py-3">Status</th><th className="px-5 py-3 text-right">Action</th>
             </tr></thead>
             <tbody>
               {rows.map(workload => (
@@ -113,13 +117,14 @@ export default function Workloads() {
                   <td className="px-5 py-3 font-semibold text-slate-700">{workload.name}</td>
                   <td className="px-3 py-3">{workload.workload_type}</td>
                   <td className="px-3 py-3">{workload.initial_load}%</td>
+                  <td className="px-3 py-3"><div className="flex min-w-24 items-center gap-2"><div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500" style={{ width: Math.max(0, Math.min(100, workload.current_load || 0)) + "%" }} /></div><span className="text-[10px] tabular-nums">{Number(workload.current_load || 0).toFixed(0)}%</span></div></td>
                   <td className="px-3 py-3">{workload.growth_rate}</td>
                   <td className="px-3 py-3">{workload.duration_seconds}s</td>
                   <td className="px-3 py-3"><span className={"inline-flex rounded-md px-2 py-1 text-[9px] font-bold " + (workload.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500")}>{workload.active ? "RUNNING" : "STOPPED"}</span></td>
                   <td className="px-5 py-3 text-right"><button type="button" onClick={() => toggle(workload)} className="btn-secondary min-h-8 px-3 py-1">{workload.active ? "Stop" : "Start"}</button></td>
                 </tr>
               ))}
-              {rows.length === 0 && !error && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-500">No workload profiles available. Create one above to get started.</td></tr>}
+              {rows.length === 0 && !error && <tr><td colSpan={8} className="px-5 py-10 text-center text-slate-500">No workload profiles available. Create one above to get started.</td></tr>}
             </tbody>
           </table>
         </div>
