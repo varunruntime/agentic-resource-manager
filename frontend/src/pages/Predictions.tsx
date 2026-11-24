@@ -17,6 +17,7 @@ type Prediction = {
 
 type Metric = { timestamp: string; cpu_percent: number; memory_percent: number };
 function value(input: unknown, digits = 1) {
+  if (input === null || input === undefined || input === "") return "—";
   const n = Number(input);
   return Number.isFinite(n) ? n.toFixed(digits) : "—";
 }
