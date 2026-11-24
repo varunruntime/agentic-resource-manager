@@ -136,9 +136,6 @@ def _run_baseline(trace, sim, seed):
             if overload_start is not None and action == "ADD_INSTANCE":
                 reaction_times.append(i - overload_start)
                 overload_start = None
-        elif current["cpu_percent"] > 80 or current["cpu_percent"] < 30:
-            unnecessary += 1
-
         post = _add_derived_metrics(
             sim.metrics(load, instances, seed + i),
             instances
@@ -168,7 +165,7 @@ def _run_proposed(trace, sim, seed):
     feedback = None
     last_action_time = None
     pending_forecasts = {}
-    overload_start = None
+    risk_start = None
 
     weights = SimpleNamespace(
         performance=0.40,
@@ -186,9 +183,6 @@ def _run_proposed(trace, sim, seed):
             cpu_capacity_multiplier,
         )
         history.append(dict(current))
-
-        if current["cpu_percent"] > 80 and overload_start is None:
-            overload_start = i
 
         # Use a deterministic simulation clock so the same 60-second
         # cooldown is enforced by the orchestrator in repeatable runs.
@@ -237,6 +231,10 @@ def _run_proposed(trace, sim, seed):
             or predicted_peak_cpu >= 80
             or predicted_peak_memory >= 90
         )
+        if predicted_pressure and risk_start is None:
+            risk_start = i
+        elif not predicted_pressure:
+            risk_start = None
 
         after = result["actual_result"]
 
@@ -259,12 +257,12 @@ def _run_proposed(trace, sim, seed):
             ):
                 unnecessary += 1
 
-            if overload_start is not None and action in {
+            if risk_start is not None and action in {
                 "ADD_INSTANCE",
                 "INCREASE_CPU",
             }:
-                reaction_times.append(i - overload_start)
-                overload_start = None
+                reaction_times.append(i - risk_start)
+                risk_start = None
 
         instances = int(after.get("instances", instances))
         cpu_capacity_multiplier = float(after.get("cpu_capacity_multiplier", cpu_capacity_multiplier))
