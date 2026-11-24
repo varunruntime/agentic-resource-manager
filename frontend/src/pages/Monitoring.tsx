@@ -14,23 +14,31 @@ const chartGroups = [
 export default function Monitoring() {
   const [history, setHistory] = useState<Metric[]>([]);
   const [error, setError] = useState("");
+  const [socketState, setSocketState] = useState<"connecting" | "connected" | "disconnected">("connecting");
 
   useEffect(() => {
+    let mounted = true;
     api.get("/api/resources/history")
-      .then(response => setHistory(Array.isArray(response.data) ? response.data : []))
-      .catch(err => { console.error(err); setError("Unable to load historical telemetry."); });
+      .then(response => { if (mounted) setHistory(Array.isArray(response.data) ? response.data : []); })
+      .catch(err => { console.error(err); if (mounted) setError("Unable to load historical telemetry."); });
 
     const ws = new WebSocket((import.meta.env.VITE_WS_URL || "ws://localhost:8000") + "/ws/metrics");
+    ws.onopen = () => { if (mounted) setSocketState("connected"); };
     ws.onmessage = event => {
       try {
         const reading = JSON.parse(event.data) as Metric;
-        setHistory(previous => [...previous, reading].slice(-100));
+        if (mounted) setHistory(previous => [...previous, reading].slice(-100));
       } catch (err) { console.error("Invalid telemetry message:", err); }
     };
-    ws.onerror = err => console.error("Monitoring WebSocket error:", err);
-    return () => ws.close();
+    ws.onerror = err => {
+      console.error("Monitoring WebSocket error:", err);
+      if (mounted) setSocketState("disconnected");
+    };
+    ws.onclose = () => { if (mounted) setSocketState("disconnected"); };
+    return () => { mounted = false; ws.close(); };
   }, []);
 
+  const live = socketState === "connected";
   return (
     <main>
       <header className="page-head">
@@ -39,11 +47,16 @@ export default function Monitoring() {
           <h1 className="page-title">Resource Monitoring</h1>
           <p className="page-description">Live and historical resource telemetry from the local monitoring simulator.</p>
         </div>
-        <div className="page-actions"><span className="topbar-chip safety"><span className="chip-dot" /> LIVE FEED</span></div>
+        <div className="page-actions">
+          <span className={"topbar-chip " + (live ? "safety" : "")}>
+            <span className="chip-dot" style={{ background: live ? "#18a58c" : "#d39a33" }} />
+            {socketState === "connecting" ? "CONNECTING" : live ? "LIVE FEED" : "FEED DISCONNECTED"}
+          </span>
+        </div>
       </header>
       {error && <div role="alert" className="alert alert-error">{error}</div>}
       <div className="status-strip">
-        <div className="status-item"><span className="status-pulse" /> <strong>WebSocket listener active</strong></div>
+        <div className="status-item"><span className={"status-pulse " + (live ? "" : "warn")} /> <strong>{live ? "WebSocket connected" : "Waiting for telemetry socket"}</strong></div>
         <div className="status-item">Visible readings <strong>{history.length}</strong></div>
         <div className="status-item">Window <strong>Latest 100 samples</strong></div>
       </div>
