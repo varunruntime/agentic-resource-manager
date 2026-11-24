@@ -228,7 +228,15 @@ def run_agent(req: AgentRunRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/agents/status")
-def agent_status(): return {"orchestrator":"READY","mode":"SIMULATION","llm_available":bool(settings.llm_api_key),"safety":"ENABLED"}
+def agent_status():
+    return {
+        "orchestrator": "READY",
+        "mode": "SIMULATION",
+        "llm_available": False,
+        "llm_configured": bool(settings.llm_api_key),
+        "reasoning_provider": "rule_based",
+        "safety": "ENABLED",
+    }
 @router.get("/decisions")
 def decisions(db:Session=Depends(get_db)): return [{"decision_id":d.decision_id,"timestamp":d.timestamp,"action":d.action,"outcome":d.outcome} for d in db.query(AgentDecision).order_by(AgentDecision.id.desc()).limit(100).all()]
 @router.get("/decisions/{id}")
