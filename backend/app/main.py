@@ -84,6 +84,32 @@ async def _workload_telemetry_loop():
                     estimated_energy=energy,
                 ))
                 db.commit()
+            else:
+                # When the final workload is stopped manually, publish one
+                # idle sample so dashboards do not retain stale load counts.
+                latest = db.query(ResourceMetric).order_by(ResourceMetric.id.desc()).first()
+                if latest is not None and int(latest.active_workloads) > 0:
+                    instances = max(1, int(latest.instances))
+                    capacity_multiplier = _capacity_multiplier(latest)
+                    snapshot = monitor.observe_simulated(
+                        0,
+                        instances=instances,
+                        active_workloads=0,
+                        seed=int(datetime.utcnow().timestamp() * 1000) % (2**31 - 1),
+                        cpu_capacity_multiplier=capacity_multiplier,
+                    )
+                    db.add(ResourceMetric(
+                        cpu_percent=float(snapshot["cpu_percent"]),
+                        memory_percent=float(snapshot["memory_percent"]),
+                        disk_percent=float(snapshot["disk_percent"]),
+                        network_usage=0.0,
+                        active_workloads=0,
+                        instances=instances,
+                        latency_ms=45.0,
+                        estimated_cost=0.10 * instances * capacity_multiplier,
+                        estimated_energy=0.18 * instances * capacity_multiplier,
+                    ))
+                    db.commit()
         except asyncio.CancelledError:
             db.rollback()
             raise
