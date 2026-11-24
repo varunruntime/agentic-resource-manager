@@ -223,3 +223,36 @@ def test_experiment_comparison_returns_two_finite_system_rows(workload):
         ):
             assert isinstance(row[key], (int, float))
             assert row[key] >= 0
+
+
+def test_execution_cpu_increase_persists_capacity_multiplier():
+    state = {
+        "instances": 2,
+        "cpu_percent": 90,
+        "memory_percent": 70,
+        "latency_ms": 150,
+        "estimated_cost": 0.2,
+        "estimated_energy": 0.36,
+        "cpu_capacity_multiplier": 1.0,
+    }
+    _, after = ExecutionAgent().simulate(
+        {"action": "INCREASE_CPU", "delta": 0},
+        state,
+    )
+    assert after["cpu_capacity_multiplier"] > state["cpu_capacity_multiplier"]
+
+    monitor = MonitoringAgent()
+    before_metrics = monitor.observe_simulated(90, instances=2, seed=11)
+    after_metrics = monitor.observe_simulated(
+        90,
+        instances=2,
+        seed=11,
+        cpu_capacity_multiplier=after["cpu_capacity_multiplier"],
+    )
+    assert after_metrics["cpu_percent"] < before_metrics["cpu_percent"]
+
+
+def test_sudden_spike_scenario_exercises_threshold_scaling():
+    baseline, proposed = run_comparison("Sudden Spike", duration=24, seed=42)
+    assert baseline["scaling_actions"] >= 1
+    assert proposed["scaling_actions"] >= 1
