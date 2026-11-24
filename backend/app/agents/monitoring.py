@@ -37,7 +37,7 @@ class MonitoringAgent:
         cpu = max(0.0, min(100.0, (float(load) / capacity) * 100.0))
         cpu = max(0.0, min(100.0, cpu + rng.uniform(-2.0, 2.0)))
         memory = max(0.0, min(100.0, 35.0 + 0.55 * cpu + rng.uniform(-2.0, 2.0)))
-        network = max(0.0, min(100.0, float(load) * 0.9 + rng.uniform(-3.0, 3.0)))
+        network = max(0.0, min(100.0, float(load) * 0.9 + rng.uniform(-3.0, 3.0))))
 
         return {
             "timestamp": datetime.utcnow().isoformat(),
